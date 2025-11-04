@@ -1,0 +1,32 @@
+dashboard:
+  enabled: true
+
+apisix:
+  prometheus:
+    enabled: true
+
+ingress-controller:
+  enabled: true
+  config:
+    apisix:
+      serviceNamespace: apisix
+    kubernetes:
+      gatewayProvider:
+        enabled: true
+        gatewayClassName: apisix
+        gatewayNamespace: apisix
+        gatewayName: apisix-gateway
+      ingressClass: apisix
+      defaultIngressClass: false
+  gatewayProxy:
+    createDefault: true
+    provider:
+      type: ControlPlane
+      controlPlane:
+        service:
+          name: apisix-admin
+          port: 9180
+        auth:
+          type: AdminKey
+          adminKey:
+            value: edd1c9f034335f136f87ad84b625c8f1

@@ -1,0 +1,36 @@
+apiVersion: apisix.apache.org/v2
+kind: ApisixRoute
+metadata:
+  name: go-rest-apisix
+  namespace: default
+spec:
+  ingressClassName: apisix
+  http:
+  - name: go-rest-key
+    priority: 20
+    match:
+      hosts:
+      - apitest.local
+      paths:
+      - "/*"
+      exprs:
+      - subject:
+          scope: Header
+          name: x-api-key
+        op: RegexMatch
+        value: .+
+    plugin_config_name: go-rest-keyauth
+    backends:
+    - serviceName: go-rest-api-service
+      servicePort: 80
+  - name: go-rest-oidc
+    priority: 10
+    match:
+      hosts:
+      - apitest.local
+      paths:
+      - "/*"
+    plugin_config_name: go-rest-oidc
+    backends:
+    - serviceName: go-rest-api-service
+      servicePort: 80

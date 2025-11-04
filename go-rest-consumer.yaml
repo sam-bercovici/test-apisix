@@ -1,0 +1,14 @@
+apiVersion: apisix.apache.org/v1alpha1
+kind: Consumer
+metadata:
+  name: demo
+  namespace: default
+spec:
+  gatewayRef:
+    name: apisix-gateway
+    namespace: apisix
+  credentials:
+  - type: key-auth
+    name: go-rest-key
+    config:
+      key: go-rest-demo-key

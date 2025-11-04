@@ -1,0 +1,33 @@
+#
+# Optional HTTPRoute example for apitest.local.
+# NOTE: This manifest is not applied by default because the ApisixRoute in
+# go-rest-apisixroute.yaml already implements the dual auth (OIDC or API key).
+# Apply only if you explicitly need a Gateway API representation and ensure
+# equivalent authentication is enforced.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: go-rest-route
+  namespace: default
+  annotations:
+    apisix.apache.org/plugin-config-name: default/go-rest-oidc
+spec:
+  parentRefs:
+  - name: apisix-gateway
+    namespace: apisix
+  hostnames:
+  - "apitest.local"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: go-rest-api-service
+      port: 80
+      filters:
+      - type: ExtensionRef
+        extensionRef:
+          group: apisix.apache.org
+          kind: ApisixPluginConfig
+          name: go-rest-oidc

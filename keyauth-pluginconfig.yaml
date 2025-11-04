@@ -1,0 +1,31 @@
+apiVersion: apisix.apache.org/v2
+kind: ApisixPluginConfig
+metadata:
+  name: go-rest-keyauth
+  namespace: default
+spec:
+  plugins:
+  - name: key-auth
+    enable: true
+    config:
+      header: x-api-key
+      query: apikey
+      hide_credentials: true
+  - name: limit-req
+    enable: true
+    config:
+      rate: 10                # requests per second per identity
+      burst: 5
+      key_type: var           # throttle per authenticated identity (API key)
+      key: consumer_name
+      rejected_code: 429
+      rejected_msg: "Rate limited (identity)."
+  - name: limit-count
+    enable: true
+    config:
+      count: 240              # global fallback based on client address
+      time_window: 60
+      key_type: var
+      key: remote_addr
+      rejected_code: 429
+      rejected_msg: "Quota exceeded (source IP)."

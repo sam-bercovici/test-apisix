@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-rest-api-deployment
+  labels:
+    app: go-rest-api
+spec:
+  replicas: 1 # You can scale this up if needed
+  selector:
+    matchLabels:
+      app: go-rest-api
+  template:
+    metadata:
+      labels:
+        app: go-rest-api
+    spec:
+      containers:
+      - name: go-rest-api-container
+        image: davarski/go-rest-api-demo:latest # A public image with a simple REST API
+        ports:
+        - containerPort: 10000 # Application listens on port 10000 internally

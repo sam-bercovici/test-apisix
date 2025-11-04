@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm-config
+  namespace: default
+data:
+  realm-export.json: |
+    {
+      "realm": "demo",
+      "enabled": true,
+      "displayName": "Demo Realm",
+      "users": [
+        {
+          "username": "demo",
+          "enabled": true,
+          "emailVerified": true,
+          "email": "demo@example.com",
+          "firstName": "Demo",
+          "lastName": "User",
+          "requiredActions": [],
+          "credentials": [
+            {
+              "type": "password",
+              "value": "demo",
+              "temporary": false
+            }
+          ]
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "go-rest",
+          "secret": "go-rest-secret",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "bearerOnly": false,
+          "redirectUris": [
+            "http://apisix-gateway.apisix.svc.cluster.local/*",
+            "http://apitest.local/*",
+            "http://httpbin.local/*",
+            "http://127.0.0.1/*"
+          ],
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": true,
+          "serviceAccountsEnabled": false,
+          "rootUrl": ""
+        }
+      ]
+    }
