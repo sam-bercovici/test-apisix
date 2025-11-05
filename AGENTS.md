@@ -2,14 +2,16 @@
 
 ## Project Structure & Module Organization
 This repository packages Apache APISIX Gateway API manifests for routing demo services.
-- `httpbin-route.yaml` declares the `GatewayClass`, `Gateway`, and `HTTPRoute` used to expose httpbin; group related routes in future under a directory per service and reference them from an overlay.
+- `gateway.yaml` declares the `GatewayClass` and `Gateway` infrastructure resources that enable Gateway API routing.
+- `httpbin-route.yaml` declares the `HTTPRoute` used to expose the httpbin demo service; group related routes in future under a directory per service and reference them from an overlay.
 - `values-gateway.yaml` is the Helm values file applied to the APISIX chart; it now manages the default `GatewayProxy` via Helm—keep environment-specific overrides in similarly named files (`values-<env>.yaml`) and avoid mixing secrets into them.
 - `requirements/` holds written requirements for the project. Document any new functional or non-functional requirements as Markdown files in this directory so the team has a single source of truth.
 
 ## Build, Test, and Development Commands
 - `helm repo add apisix https://charts.apiseven.com` once per environment to source the APISIX chart.
 - `helm upgrade --install apisix apisix/apisix -f values-gateway.yaml -n apisix --create-namespace` deploys or updates the gateway with the repo configuration.
-- `kubectl apply -f httpbin-route.yaml` syncs the Gateway API resources; pair with `kubectl delete -f` when retiring routes.
+- `kubectl apply -f gateway.yaml` applies the Gateway API infrastructure (GatewayClass and Gateway).
+- `kubectl apply -f httpbin-route.yaml` syncs the HTTPRoute resources; pair with `kubectl delete -f` when retiring routes.
 
 ## Coding Style & Naming Conventions
 Stick to two-space indentation in YAML and alphabetize top-level keys where practical.
