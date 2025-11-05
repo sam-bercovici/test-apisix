@@ -4,6 +4,7 @@
 This repository packages Apache APISIX Gateway API manifests for routing demo services.
 - `httpbin-route.yaml` declares the `GatewayClass`, `Gateway`, and `HTTPRoute` used to expose httpbin; group related routes in future under a directory per service and reference them from an overlay.
 - `values-gateway.yaml` is the Helm values file applied to the APISIX chart; it now manages the default `GatewayProxy` via Helm—keep environment-specific overrides in similarly named files (`values-<env>.yaml`) and avoid mixing secrets into them.
+- `requirements/` holds written requirements for the project. Document any new functional or non-functional requirements as Markdown files in this directory so the team has a single source of truth.
 
 ## Build, Test, and Development Commands
 - `helm repo add apisix https://charts.apiseven.com` once per environment to source the APISIX chart.
