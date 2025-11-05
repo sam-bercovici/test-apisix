@@ -3,9 +3,50 @@
 ## Prerequisites
 
 - APISIX, Keycloak, httpbin, and go-rest services deployed (as in repo setup).
+- Jetstack cert-manager installed with the `apisix-local-wildcard` certificate ready (handled by `./redeploy.sh`).
 - `kubectl`, `curl`, `jq` in your PATH.
 - Access to the kind cluster (use `kubectl config use-context kind-kind` if needed).
 - `/etc/hosts` (or equivalent) contains entries pointing `apitest.local` and `httpbin.local` to the kind node IP.
+
+---
+
+## Preflight: Validate cert-manager and TLS
+
+1. Confirm the cert-manager pods are running:
+   ```bash
+   kubectl get pods -n cert-manager
+   ```
+   Expect `cert-manager`, `cert-manager-cainjector`, and `cert-manager-webhook` in `Running` state.
+2. Double-check the manifests with a dry run whenever you make changes:
+   ```bash
+   kubectl apply --server-dry-run=client -f apisix-local-tls.yaml
+   ```
+3. Inspect the wildcard certificate and secret managed by cert-manager:
+   ```bash
+   kubectl get certificate apisix-local-wildcard -n apisix -o wide
+   kubectl describe certificate apisix-local-wildcard -n apisix
+   kubectl get secret apisix-local-wildcard-tls -n apisix
+   ```
+   The certificate should report `Ready=True` with a recent issuance time before continuing. Private keys rotate automatically (`rotationPolicy: Always`), so a reissued secret will show a new creation timestamp after each reconciliation.
+4. (Optional) Render the APISIX chart with kubeconform to catch regressions after editing Helm values:
+   ```bash
+   helm template apisix apisix/apisix -f values-gateway.yaml | kubeconform
+   ```
+5. Confirm the Gateway API resources are healthy:
+   ```bash
+   kubectl get gateway,httproute -A
+   ```
+   Look for `Programmed=True` on `Gateway/apisix/apisix-gateway` before testing traffic.
+6. Verify the APISIX gateway service publishes both HTTP and HTTPS ports:
+   ```bash
+   kubectl get svc apisix-gateway -n apisix -o jsonpath='{range .spec.ports[*]}{.name}:{.port}{":"}{.nodePort}{"\n"}{end}'
+   ```
+   Expect `apisix-gateway:80:<nodePort>` and `apisix-gateway-tls:443:<nodePort>`. NodePorts auto-allocate for each port when the service type is `NodePort`.
+7. The wildcard certificate is bound via `ApisixTls` (`apisix-tls-local.yaml`). Confirm it’s present:
+   ```bash
+   kubectl get apisixtls -n apisix
+   ```
+   Status should list `*.local` mapped to `apisix-local-wildcard-tls`.
 
 ---
 
@@ -68,6 +109,12 @@ Validation complete.
     export NODE_PORT=8080
     ./validate-apitest.sh
     ```
+- To exercise the TLS listener, curl with the wildcard certificate (accepting the self-signed issuer). Use either `/etc/hosts` entries pointing `apitest.local` to the Kind node IP **or** `curl --resolve` so the TLS SNI matches the wildcard:
+  ```bash
+  HTTPS_NODE_PORT=$(kubectl get svc apisix-gateway -n apisix -o jsonpath='{.spec.ports[?(@.port==443)].nodePort}')
+  curl -k --resolve httpbin.local:${HTTPS_NODE_PORT}:${NODE_IP} "https://httpbin.local:${HTTPS_NODE_PORT}/status/200"
+  curl -k --resolve apitest.local:${HTTPS_NODE_PORT}:${NODE_IP} -H "X-API-Key: go-rest-demo-key" "https://apitest.local:${HTTPS_NODE_PORT}/health-check"
+  ```
 - Override the API key header/value if you rotated credentials:
   ```bash
   export API_KEY_HEADER=X-API-Key
@@ -201,6 +248,13 @@ Expect several `# HELP` / `# TYPE` lines along with APISIX metric samples. A fai
 - **401 even with token** → check Keycloak logs (`kubectl logs deploy/keycloak -n default`) for introspection errors; ensure `go-rest-oidc` plugin config is applied and client `go-rest` has `serviceAccountsEnabled = true` with both `token_endpoint_auth_method` and `introspection_endpoint_auth_method` set to `client_secret_post`.
 - **Realm missing** → restart Keycloak pod to re-import realm:  
   `kubectl rollout restart deploy/keycloak -n default`.
+
+---
+
+## Cleanup
+
+- Run `./cleanup-local-tls.sh` to remove the self-signed wildcard certificate, issuer, and secret when dismantling the environment. cert-manager rotates keys (`rotationPolicy: Always`), so the next `kubectl apply -f apisix-local-tls.yaml` will mint a fresh keypair automatically.
+- Follow with `kubectl delete -f apisix-local-tls.yaml` if you need to drop the Kubernetes objects entirely from the cluster.
 
 ---
 

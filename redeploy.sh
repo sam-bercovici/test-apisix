@@ -30,6 +30,27 @@ PROMETHEUS_SERVICE_FILE="${PROMETHEUS_SERVICE_FILE:-apisix-prometheus-service.ya
 PROMETHEUS_SERVICE_NAME="${PROMETHEUS_SERVICE_NAME:-apisix-prometheus}"
 PROMETHEUS_SERVICE_NAMESPACE="${PROMETHEUS_SERVICE_NAMESPACE:-apisix}"
 PROMETHEUS_PROBE_NAMESPACE="${PROMETHEUS_PROBE_NAMESPACE:-apisix}"
+LOCAL_TLS_MANIFEST="${LOCAL_TLS_MANIFEST:-apisix-local-tls.yaml}"
+LOCAL_TLS_CERTIFICATE_NAME="${LOCAL_TLS_CERTIFICATE_NAME:-apisix-local-wildcard}"
+LOCAL_TLS_SECRET_NAME="${LOCAL_TLS_SECRET_NAME:-apisix-local-wildcard-tls}"
+LOCAL_TLS_ISSUER_NAME="${LOCAL_TLS_ISSUER_NAME:-apisix-local-selfsigned}"
+LOCAL_TLS_NAMESPACE="${LOCAL_TLS_NAMESPACE:-${APISIX_NAMESPACE}}"
+APISIX_TLS_MANIFEST="${APISIX_TLS_MANIFEST:-apisix-tls-local.yaml}"
+CERT_MANAGER_RELEASE="${CERT_MANAGER_RELEASE:-cert-manager}"
+CERT_MANAGER_NAMESPACE="${CERT_MANAGER_NAMESPACE:-cert-manager}"
+CERT_MANAGER_HELM_REPO_NAME="${CERT_MANAGER_HELM_REPO_NAME:-jetstack}"
+CERT_MANAGER_HELM_REPO_URL="${CERT_MANAGER_HELM_REPO_URL:-https://charts.jetstack.io}"
+CERT_MANAGER_CHART="${CERT_MANAGER_CHART:-cert-manager}"
+CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-}"
+CERT_MANAGER_WAIT_TIMEOUT="${CERT_MANAGER_WAIT_TIMEOUT:-240}"
+CERT_MANAGER_CRDS=(
+  certificates.cert-manager.io
+  certificaterequests.cert-manager.io
+  challenges.acme.cert-manager.io
+  clusterissuers.cert-manager.io
+  issuers.cert-manager.io
+  orders.acme.cert-manager.io
+)
 HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-apisix}"
 HELM_REPO_NAME="${HELM_REPO_NAME:-apisix}"
 HELM_REPO_URL="${HELM_REPO_URL:-https://charts.apiseven.com}"
@@ -154,6 +175,116 @@ wait_for_apisixroute_accepted() {
   die "Timed out waiting for ApisixRoute ${namespace}/${route} to be accepted"
 }
 
+wait_for_crd_established() {
+  local crd=$1
+  local timeout=${2:-120}
+  local end=$((SECONDS + timeout))
+  while (( SECONDS < end )); do
+    if kubectl get crd "${crd}" >/dev/null 2>&1; then
+      local status
+      status="$(kubectl get crd "${crd}" -o jsonpath='{.status.conditions[?(@.type=="Established")].status}' 2>/dev/null || true)"
+      if [[ "${status^^}" == *TRUE* ]]; then
+        return 0
+      fi
+    fi
+    sleep 3
+  done
+  die "CRD ${crd} was not established within ${timeout}s"
+}
+
+wait_for_cert_manager_crds() {
+  local crd
+  for crd in "${CERT_MANAGER_CRDS[@]}"; do
+    wait_for_crd_established "${crd}" "${CERT_MANAGER_WAIT_TIMEOUT}"
+  done
+}
+
+wait_for_cert_manager_deployments() {
+  local deployments=(
+    cert-manager
+    cert-manager-cainjector
+    cert-manager-webhook
+  )
+  local deployment
+  for deployment in "${deployments[@]}"; do
+    wait_for_deployment "${CERT_MANAGER_NAMESPACE}" "${deployment}" "${CERT_MANAGER_WAIT_TIMEOUT}"
+    kubectl rollout status -n "${CERT_MANAGER_NAMESPACE}" \
+      "deployment/${deployment}" \
+      --timeout="${CERT_MANAGER_WAIT_TIMEOUT}s" >/dev/null
+  done
+}
+
+ensure_cert_manager_ready() {
+  if ! helm repo list | awk '{print $1}' | grep -Fxq "${CERT_MANAGER_HELM_REPO_NAME}"; then
+    log "Adding Helm repo ${CERT_MANAGER_HELM_REPO_NAME}"
+    helm repo add "${CERT_MANAGER_HELM_REPO_NAME}" "${CERT_MANAGER_HELM_REPO_URL}"
+  else
+    log "Helm repo ${CERT_MANAGER_HELM_REPO_NAME} already present"
+  fi
+
+  log "Updating Helm repo ${CERT_MANAGER_HELM_REPO_NAME}"
+  helm repo update "${CERT_MANAGER_HELM_REPO_NAME}" >/dev/null
+
+  local version_flag=()
+  if [[ -n "${CERT_MANAGER_VERSION}" ]]; then
+    version_flag=(--version "${CERT_MANAGER_VERSION}")
+  fi
+
+  log "Installing/Upgrading cert-manager Helm release ${CERT_MANAGER_RELEASE}"
+  helm upgrade --install "${CERT_MANAGER_RELEASE}" "${CERT_MANAGER_HELM_REPO_NAME}/${CERT_MANAGER_CHART}" \
+    -n "${CERT_MANAGER_NAMESPACE}" \
+    --create-namespace \
+    --set crds.enabled=true \
+    --wait \
+    "${version_flag[@]}"
+
+  wait_for_cert_manager_crds
+  wait_for_cert_manager_deployments
+}
+
+wait_for_secret() {
+  local namespace=$1
+  local name=$2
+  local timeout=${3:-120}
+  local end=$((SECONDS + timeout))
+  while (( SECONDS < end )); do
+    if kubectl get secret "${name}" -n "${namespace}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 3
+  done
+  die "Secret ${namespace}/${name} not found within ${timeout}s"
+}
+
+apply_local_tls_resources() {
+  if [[ ! -f "${LOCAL_TLS_MANIFEST}" ]]; then
+    log "Skipping local TLS resources; manifest ${LOCAL_TLS_MANIFEST} not found"
+    return 0
+  fi
+
+  log "Applying local TLS issuer and certificate (${LOCAL_TLS_MANIFEST})"
+  kubectl apply -f "${LOCAL_TLS_MANIFEST}"
+
+  log "Waiting for Certificate ${LOCAL_TLS_NAMESPACE}/${LOCAL_TLS_CERTIFICATE_NAME} to be Ready"
+  kubectl wait \
+    --namespace "${LOCAL_TLS_NAMESPACE}" \
+    --for=condition=Ready \
+    --timeout="${CERT_MANAGER_WAIT_TIMEOUT}s" \
+    "certificate/${LOCAL_TLS_CERTIFICATE_NAME}" >/dev/null
+
+  wait_for_secret "${LOCAL_TLS_NAMESPACE}" "${LOCAL_TLS_SECRET_NAME}" "${CERT_MANAGER_WAIT_TIMEOUT}"
+}
+
+apply_apisix_tls_binding() {
+  if [[ ! -f "${APISIX_TLS_MANIFEST}" ]]; then
+    log "Skipping ApisixTls binding; manifest ${APISIX_TLS_MANIFEST} not found"
+    return 0
+  fi
+
+  log "Applying ApisixTls binding (${APISIX_TLS_MANIFEST})"
+  kubectl apply -f "${APISIX_TLS_MANIFEST}"
+}
+
 run_connectivity_probe() {
   log "Probing httpbin route through APISIX (expect 200)"
   local output status
@@ -207,11 +338,35 @@ print_external_curl_hint() {
     node_port="$(kubectl get svc "${HELM_RELEASE_NAME}-gateway" -n "${APISIX_NAMESPACE}" \
       -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || true)"
   fi
+  local https_node_port
+  https_node_port="$(kubectl get svc "${HELM_RELEASE_NAME}-gateway" -n "${APISIX_NAMESPACE}" \
+    -o jsonpath='{.spec.ports[?(@.port==443)].nodePort}' 2>/dev/null || true)"
+  https_node_port="${https_node_port%% *}"
+  if [[ -z "${https_node_port}" ]]; then
+    https_node_port="$(kubectl get svc "${HELM_RELEASE_NAME}-gateway" -n "${APISIX_NAMESPACE}" \
+      -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}' 2>/dev/null || true)"
+    https_node_port="${https_node_port%% *}"
+  fi
+  if [[ -z "${https_node_port}" ]]; then
+    https_node_port="$(kubectl get svc "${HELM_RELEASE_NAME}-gateway" -n "${APISIX_NAMESPACE}" \
+      -o jsonpath='{.spec.ports[?(@.name=="apisix-gateway-tls")].nodePort}' 2>/dev/null || true)"
+    https_node_port="${https_node_port%% *}"
+  fi
   if [[ -n "${node_ip}" && -n "${node_port}" ]]; then
     echo "# External (httpbin): curl -v -H 'Host: httpbin.local' http://${node_ip}:${node_port}${HTTPBIN_TEST_PATH}"
     echo "# External (apitest): curl -v -H 'Host: apitest.local' http://${node_ip}:${node_port}${API_TEST_PATH}"
   else
     log "Could not determine NodePort or node IP for external curl hint"
+  fi
+  if [[ -n "${node_ip}" && -n "${https_node_port}" ]]; then
+    cat <<EOF
+# External TLS (httpbin via --resolve):
+curl -vk --resolve httpbin.local:${https_node_port}:${node_ip} https://httpbin.local:${https_node_port}${HTTPBIN_TEST_PATH}
+# External TLS (apitest via --resolve):
+curl -vk --resolve apitest.local:${https_node_port}:${node_ip} https://apitest.local:${https_node_port}${API_TEST_PATH}
+EOF
+  else
+    log "HTTPS NodePort not detected; ensure the service exposes port 443 before testing TLS"
   fi
 }
 
@@ -232,6 +387,9 @@ main() {
 
   log "Waiting for control-plane node to be Ready"
   kubectl wait --context "${KUBE_CONTEXT}" --for=condition=Ready node --all --timeout=180s >/dev/null
+
+  log "Ensuring cert-manager (Jetstack) is installed and ready"
+  ensure_cert_manager_ready
 
   if ! helm repo list | awk '{print $1}' | grep -Fxq "${HELM_REPO_NAME}"; then
     log "Adding Helm repo ${HELM_REPO_NAME}"
@@ -262,6 +420,9 @@ main() {
   kubectl rollout status -n "${APISIX_NAMESPACE}" \
     "deployment/${HELM_RELEASE_NAME}-ingress-controller" \
     --timeout=180s >/dev/null
+
+  apply_local_tls_resources
+  apply_apisix_tls_binding
 
   log "Deploying httpbin backend (deployment + service)"
   cat <<EOF | kubectl apply -n "${HTTPBIN_NAMESPACE}" -f -

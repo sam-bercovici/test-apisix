@@ -1,0 +1,27 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  annotations:
+    apisix.apache.org/purpose: Local self-signed issuer for Gateway TLS
+  name: apisix-local-selfsigned
+  namespace: apisix
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  annotations:
+    apisix.apache.org/purpose: Wildcard certificate for local *.local endpoints
+  name: apisix-local-wildcard
+  namespace: apisix
+spec:
+  privateKey:
+    rotationPolicy: Always
+  dnsNames:
+  - "*.local"
+  - "apitest.local"
+  - "httpbin.local"
+  issuerRef:
+    name: apisix-local-selfsigned
+  secretName: apisix-local-wildcard-tls

@@ -1,9 +1,20 @@
-dashboard:
-  enabled: true
-
 apisix:
   prometheus:
     enabled: true
+  ssl:
+    enabled: true
+    containerPort: 9443
+
+dashboard:
+  enabled: true
+
+service:
+  type: NodePort
+  http:
+    enabled: true
+    servicePort: 80
+  tls:
+    servicePort: 443
 
 ingress-controller:
   enabled: true
