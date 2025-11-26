@@ -1,0 +1,18 @@
+# Stable service for routing to internal gateway
+# Uses label selectors to target internal gateway pods regardless of hash
+apiVersion: v1
+kind: Service
+metadata:
+  name: eg-internal-backend
+  namespace: envoy-gateway-system
+  annotations:
+    description: "Stable service reference to internal gateway for external-to-internal forwarding"
+spec:
+  selector:
+    gateway.envoyproxy.io/owning-gateway-name: eg-internal
+    gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP

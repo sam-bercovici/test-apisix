@@ -1,0 +1,16 @@
+config:
+  envoyGateway:
+    gateway:
+      controllerName: gateway.envoyproxy.io/gatewayclass-controller
+    rateLimit:
+      backend:
+        type: Redis
+        redis:
+          url: redis.redis-system.svc.cluster.local:6379
+      failClosed: false  # Allow traffic if rate limit service unavailable
+    extensionApis:
+      enableEnvoyPatchPolicy: true
+      enableBackend: true
+    logging:
+      level:
+        default: info

@@ -2,27 +2,21 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# This script drives bursts against the APISIX gateway to verify the rate
-# limiting behaviour for API-key (consumer) and OIDC-authenticated requests.
-# Pass INCLUDE_IP_SCENARIO=1 to exercise the fallback IP-based limit (requires
-# sending ~260 unauthenticated requests, which can take longer).
+# Validates rate limiting through Envoy Gateway
+# Tests Tier 1 burst limiting (10 rps per org) with JWT authentication
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-NODE_IP="${NODE_IP:-$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')}"
-NODE_PORT="${NODE_PORT:-$(kubectl get svc apisix-gateway -n apisix -o jsonpath='{.spec.ports[0].nodePort}')}"
-API_HOST="${API_HOST:-apitest.local}"
-API_PATH="${API_PATH:-/health-check}"
-API_KEY="${API_KEY:-go-rest-demo-key}"
-JWT_USER="${JWT_USER:-demo}"
-JWT_PASS="${JWT_PASS:-demo}"
-REALM="${REALM:-demo}"
+GATEWAY_HOST="${GATEWAY_HOST:-localhost}"
+GATEWAY_PORT="${GATEWAY_PORT:-8080}"
+HYDRA_TOKEN_PATH="${HYDRA_TOKEN_PATH:-/auth/oauth2/token}"
 CLIENT_ID="${CLIENT_ID:-go-rest}"
 CLIENT_SECRET="${CLIENT_SECRET:-go-rest-secret}"
-KEYCLOAK_URL="${KEYCLOAK_URL:-http://$NODE_IP:30080}"
+API_HOST="${API_HOST:-apitest.local}"
+API_PATH="${API_PATH:-/health-check}"
 RL_SAMPLE_SIZE="${RL_SAMPLE_SIZE:-30}"
 RL_EXPECT_CODE="${RL_EXPECT_CODE:-429}"
-RL_PARALLELISM="${RL_PARALLELISM:-10}"
+RL_PARALLELISM="${RL_PARALLELISM:-15}"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,18 +30,21 @@ require() {
   command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"
 }
 
-curl_api_key() {
-  curl -s -o /dev/null -w '%{http_code}' \
-    -H "Host: ${API_HOST}" \
-    -H "X-API-Key: ${API_KEY}" \
-    "http://${NODE_IP}:${NODE_PORT}${API_PATH}"
+log() {
+  printf '[%s] %s\n' "$(date +'%H:%M:%S')" "$*"
 }
 
 curl_bearer() {
   curl -s -o /dev/null -w '%{http_code}' \
     -H "Host: ${API_HOST}" \
     -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-    "http://${NODE_IP}:${NODE_PORT}${API_PATH}"
+    "http://${GATEWAY_HOST}:${GATEWAY_PORT}${API_PATH}"
+}
+
+curl_no_auth() {
+  curl -s -o /dev/null -w '%{http_code}' \
+    -H "Host: ${API_HOST}" \
+    "http://${GATEWAY_HOST}:${GATEWAY_PORT}${API_PATH}"
 }
 
 collect_statuses() {
@@ -55,18 +52,23 @@ collect_statuses() {
   local sample="${2:-$RL_SAMPLE_SIZE}"
   local tmp
   tmp="$(mktemp)"
-  local active=0
+  local pids=()
+
   for _ in $(seq 1 "$sample"); do
     (
       status="$($func || echo "ERR")"
-      echo "$status" >>"$tmp"
-    ) &
-    ((active++))
-    while (( active >= RL_PARALLELISM )); do
-      sleep 0.05
-      active="$(jobs -p | wc -l | tr -d ' ')"
-    done
+      echo "$status"
+    ) >> "$tmp" &
+    pids+=($!)
+
+    # Limit parallelism
+    if (( ${#pids[@]} >= RL_PARALLELISM )); then
+      wait "${pids[0]}" 2>/dev/null || true
+      pids=("${pids[@]:1}")
+    fi
   done
+
+  # Wait for remaining jobs
   wait
   cat "$tmp"
   rm -f "$tmp"
@@ -75,68 +77,73 @@ collect_statuses() {
 # ---------------------------------------------------------------------------
 # Preconditions
 # ---------------------------------------------------------------------------
-require kubectl
 require curl
 require jq
 
-[[ -n "$NODE_IP" ]] || die "Unable to determine node IP"
-[[ -n "$NODE_PORT" ]] || die "Unable to determine nodePort"
+API_BASE="http://${GATEWAY_HOST}:${GATEWAY_PORT}"
 
-echo "Using node IP: $NODE_IP"
-echo "Using nodePort: $NODE_PORT"
-echo "API endpoint: http://$NODE_IP:$NODE_PORT$API_PATH (Host: $API_HOST)"
-echo "Sample size: $RL_SAMPLE_SIZE, expected 429 after threshold: $RL_EXPECT_CODE"
-
-# ---------------------------------------------------------------------------
-# Obtain Keycloak token for the demo user
-# ---------------------------------------------------------------------------
-TOKEN_JSON="$(curl -s \
-  -d "grant_type=password" \
-  -d "client_id=$CLIENT_ID" \
-  -d "client_secret=$CLIENT_SECRET" \
-  -d "username=$JWT_USER" \
-  -d "password=$JWT_PASS" \
-  "$KEYCLOAK_URL/realms/$REALM/protocol/openid-connect/token")" || die "Failed to call token endpoint"
-
-ACCESS_TOKEN="$(jq -r '.access_token' <<<"$TOKEN_JSON")"
-[[ -n "$ACCESS_TOKEN" && "$ACCESS_TOKEN" != "null" ]] || die "Failed to obtain access token: $TOKEN_JSON"
+log "Gateway endpoint: ${API_BASE}"
+log "API host: ${API_HOST}, path: ${API_PATH}"
+log "Sample size: ${RL_SAMPLE_SIZE}, parallelism: ${RL_PARALLELISM}"
+log "Expected rate limit code: ${RL_EXPECT_CODE}"
 
 # ---------------------------------------------------------------------------
-# Test matrix
+# Obtain access token from Hydra (client credentials flow)
 # ---------------------------------------------------------------------------
-scenarios=(api_key bearer)
+log "Obtaining access token from Hydra..."
+TOKEN_JSON="$(curl -sS \
+  -X POST \
+  -d "grant_type=client_credentials" \
+  -d "client_id=${CLIENT_ID}" \
+  -d "client_secret=${CLIENT_SECRET}" \
+  "${API_BASE}${HYDRA_TOKEN_PATH}")" || die "Failed to call token endpoint"
 
-declare -A func_map=(
-  [api_key]=curl_api_key
-  [bearer]=curl_bearer
-)
+ACCESS_TOKEN="$(jq -r '.access_token' <<<"${TOKEN_JSON}")"
+[[ -n "${ACCESS_TOKEN}" && "${ACCESS_TOKEN}" != "null" ]] || die "Failed to obtain access token: ${TOKEN_JSON}"
 
-declare -A results
+log "Successfully obtained access token for client '${CLIENT_ID}'"
 
-for scenario in "${scenarios[@]}"; do
-  echo
-  echo "=== Scenario: $scenario ==="
-  func_name="${func_map[$scenario]}"
-  status_series="$(collect_statuses "$func_name" "$RL_SAMPLE_SIZE")"
-
-  echo "$status_series"
-  if grep -q "^${RL_EXPECT_CODE}$" <<<"$status_series"; then
-    echo "Scenario '$scenario' hit rate limit (${RL_EXPECT_CODE})."
-    results["$scenario"]="hit"
-  else
-    echo "WARNING: Scenario '$scenario' did NOT produce ${RL_EXPECT_CODE}."
-    results["$scenario"]="miss"
-  fi
-done
-
+# ---------------------------------------------------------------------------
+# Test: JWT authenticated requests (Tier 1 burst limit)
+# ---------------------------------------------------------------------------
 echo
-echo "=== Summary ==="
-for scenario in "${scenarios[@]}"; do
-  printf '%-10s : %s\n' "$scenario" "${results[$scenario]}"
-done
+log "=== Testing Tier 1 Burst Rate Limit (JWT auth) ==="
+log "Sending ${RL_SAMPLE_SIZE} requests in parallel..."
 
-if [[ "${results[api_key]}" != "hit" || "${results[bearer]}" != "hit" ]]; then
-  die "Rate limit validation failed for API key or bearer scenario."
+status_series="$(collect_statuses curl_bearer "$RL_SAMPLE_SIZE")"
+
+# Count responses
+count_200=$(grep -c '^200$' <<<"$status_series" || echo 0)
+count_429=$(grep -c '^429$' <<<"$status_series" || echo 0)
+count_401=$(grep -c '^401$' <<<"$status_series" || echo 0)
+count_other=$(grep -cv '^200$\|^429$\|^401$' <<<"$status_series" || echo 0)
+
+log "Results: 200=${count_200}, 429=${count_429}, 401=${count_401}, other=${count_other}"
+
+if [[ "$count_429" -gt 0 ]]; then
+  log "Rate limit hit! Got ${count_429} requests with HTTP 429"
+  result="PASS"
+else
+  log "WARNING: No 429 responses received. Rate limiting may not be active."
+  result="FAIL"
 fi
 
-echo "Rate limit validation completed successfully."
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+echo
+log "=== Summary ==="
+echo "  Tier 1 Burst Limit Test: ${result}"
+echo "    - Successful requests (200): ${count_200}"
+echo "    - Rate limited (429): ${count_429}"
+echo "    - Unauthorized (401): ${count_401}"
+echo "    - Other: ${count_other}"
+echo
+
+if [[ "$result" == "FAIL" ]]; then
+  log "Rate limit validation failed."
+  log "Note: Ensure BackendTrafficPolicy is applied and rate limit service is running."
+  exit 1
+fi
+
+log "Rate limit validation completed successfully."

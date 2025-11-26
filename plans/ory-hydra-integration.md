@@ -1,8 +1,15 @@
-# Ory Hydra Integration Plan (Dev Setup)
+# Ory Hydra Integration (Helm-based with CloudNativePG)
 
 ## Overview
 
-Replace Keycloak with Ory Hydra for M2M OAuth2/OIDC token management, starting with a dev-friendly single PostgreSQL setup on local kind cluster.
+Ory Hydra provides M2M OAuth2/OIDC token management for the demo gateway, deployed via Helm chart with CloudNativePG for PostgreSQL.
+
+## Current Implementation
+
+- **Hydra Version**: v25.4.0 (deployed via Helm chart v0.52.0)
+- **PostgreSQL**: PostgreSQL 17 via CloudNativePG operator
+- **Deployment Method**: Helm chart with values in `hydra/helm-values.yaml`
+- **Database Migrations**: Handled automatically by Helm chart (automigration)
 
 ## Requirements Summary
 
@@ -13,16 +20,8 @@ Replace Keycloak with Ory Hydra for M2M OAuth2/OIDC token management, starting w
   - Clients handle 401 → re-authenticate (no refresh token persistence needed)
   - Revocation via client secret rotation in source of truth
   - Stable JWKS keys across restarts
-- **Database**: Self-contained, in-cluster PostgreSQL (dev setup first, CloudNativePG for HA later)
-- **Deployment**: kind cluster (local), integrated into `redeploy.sh`
-
-## Current Keycloak Integration (to be replaced)
-
-From `redeploy.sh`:
-- `KEYCLOAK_CONFIGMAP` → `keycloak-realm-configmap.yaml`
-- `KEYCLOAK_DEPLOYMENT` → `keycloak-deployment.yaml`
-- `KEYCLOAK_SERVICE` → `keycloak-service.yaml`
-- `OIDC_PLUGIN_CONFIG` → `openid-pluginconfig.yaml`
+- **Database**: CloudNativePG-managed PostgreSQL 17 cluster
+- **Deployment**: Kind cluster (local), integrated into `redeploy.sh`
 
 ## Architecture
 
@@ -31,14 +30,14 @@ From `redeploy.sh`:
 │                      Kubernetes Cluster                      │
 │                                                              │
 │  ┌──────────────┐      ┌──────────────┐                     │
-│  │ Client Sync  │      │   APISIX     │                     │
-│  │ Job/Init     │      │   Gateway    │                     │
+│  │ Client Sync  │      │ Envoy Gateway│                     │
+│  │ Job          │      │   Gateway    │                     │
 │  └──────┬───────┘      └──────┬───────┘                     │
 │         │                     │ validates JWT via JWKS      │
-│         │ Hydra Admin API     │                             │
+│         │ Hydra Admin API     │ (backendRefs to hydra-public)│
 │         ▼                     ▼                             │
 │  ┌────────────────────────────────────────┐                 │
-│  │         Ory Hydra (2+ replicas)        │                 │
+│  │         Ory Hydra (Helm Chart)         │                 │
 │  │  - POST /oauth2/token                  │                 │
 │  │  - GET /.well-known/jwks.json          │                 │
 │  │  - GET /.well-known/openid-configuration│                │
@@ -46,7 +45,7 @@ From `redeploy.sh`:
 │                     │                                        │
 │                     ▼                                        │
 │  ┌────────────────────────────────────────┐                 │
-│  │   PostgreSQL (single pod + PVC)        │                 │
+│  │   CloudNativePG PostgreSQL 17          │                 │
 │  │   - JWKS signing keys                  │                 │
 │  │   - OAuth2 client registrations        │                 │
 │  │   - Access token metadata              │                 │
@@ -54,229 +53,174 @@ From `redeploy.sh`:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Implementation Steps
+## File Structure
 
-### Step 1: Create Hydra Manifest Files
+All Hydra manifests are in the `hydra/` directory:
 
-Create new files (following existing Keycloak pattern):
+| File | Purpose |
+|------|---------|
+| `hydra/helm-values.yaml` | Hydra Helm chart values (v25.4.0, JWT strategy, PostgreSQL DSN) |
+| `hydra/postgres-cluster.yaml` | CloudNativePG Cluster CRD for PostgreSQL 17 |
+| `hydra/client-sync-job.yaml` | Job to create OAuth2 clients (go-rest, demo-client) |
+| `hydra/reference-grant.yaml` | ReferenceGrant for SecurityPolicy JWKS access |
 
-| New File | Replaces | Purpose |
-|----------|----------|---------|
-| `hydra-postgres-deployment.yaml` | - | PostgreSQL 15 single pod + PVC |
-| `hydra-postgres-service.yaml` | - | PostgreSQL ClusterIP service |
-| `hydra-deployment.yaml` | `keycloak-deployment.yaml` | Hydra public + admin containers |
-| `hydra-service.yaml` | `keycloak-service.yaml` | Hydra services (public:4444, admin:4445) |
-| `hydra-migration-job.yaml` | - | One-time DB migration job |
-| `hydra-client-sync-job.yaml` | `keycloak-realm-configmap.yaml` | Sync clients from source of truth |
-| `values-gateway.yaml` (update) | - | Update OIDC plugin to use Hydra JWKS |
+## Helm Values Configuration
 
-### Step 2: Update redeploy.sh
+Key settings in `hydra/helm-values.yaml`:
 
-Add new configuration variables:
-```bash
-# Hydra configuration (replaces Keycloak)
-HYDRA_NAMESPACE="${HYDRA_NAMESPACE:-hydra}"
-HYDRA_POSTGRES_DEPLOYMENT="${HYDRA_POSTGRES_DEPLOYMENT:-hydra/postgres-deployment.yaml}"
-HYDRA_POSTGRES_SERVICE="${HYDRA_POSTGRES_SERVICE:-hydra/postgres-service.yaml}"
-HYDRA_DEPLOYMENT="${HYDRA_DEPLOYMENT:-hydra/hydra-deployment.yaml}"
-HYDRA_SERVICE="${HYDRA_SERVICE:-hydra/hydra-service.yaml}"
-HYDRA_MIGRATION_JOB="${HYDRA_MIGRATION_JOB:-hydra/migration-job.yaml}"
-HYDRA_CLIENT_SYNC_JOB="${HYDRA_CLIENT_SYNC_JOB:-hydra/client-sync-job.yaml}"
-HYDRA_ROUTE="${HYDRA_ROUTE:-hydra/hydra-route.yaml}"
-```
-
-Add deployment functions (after APISIX, before httpbin):
-1. `ensure_hydra_postgres()` - Deploy PostgreSQL, wait for ready
-2. `run_hydra_migrations()` - Run migration job, wait for completion
-3. `deploy_hydra()` - Deploy Hydra pods, wait for ready
-4. `sync_hydra_clients()` - Run client sync job
-
-Update main() to call Hydra functions instead of Keycloak.
-
-### Step 3: Hydra Configuration
-
-**hydra-deployment.yaml** key settings:
 ```yaml
-env:
-  - name: DSN
-    value: postgres://hydra:hydra@hydra-postgres.hydra.svc.cluster.local:5432/hydra?sslmode=disable
-  - name: URLS_SELF_ISSUER
-    value: http://hydra.local/
-  - name: STRATEGIES_ACCESS_TOKEN
-    value: jwt
-  - name: TTL_ACCESS_TOKEN
-    value: 1h
-  - name: OAUTH2_EXPOSE_INTERNAL_ERRORS
-    value: "false"
-```
+image:
+  tag: v25.4.0
 
-**hydra-service.yaml**:
-```yaml
-ports:
-  - name: public
+hydra:
+  dev: true  # For local development only
+  automigration:
+    enabled: true
+    type: job
+  config:
+    dsn: postgres://hydra:hydra@hydra-postgres-rw.hydra.svc.cluster.local:5432/hydra?sslmode=disable
+    urls:
+      self:
+        issuer: http://hydra.local/auth
+    strategies:
+      access_token: jwt
+    ttl:
+      access_token: 1h
+    oauth2:
+      client_credentials:
+        default_grant_allowed_scope: true
+
+service:
+  public:
     port: 4444
-    nodePort: 30444  # For external access in kind
-  - name: admin
-    port: 4445       # Internal only, no nodePort
+  admin:
+    port: 4445
+
+maester:
+  enabled: false  # CRD-based client management disabled
 ```
 
-### Step 4: Client Sync Job
+## CloudNativePG Configuration
 
-The `hydra-client-sync-job.yaml` will:
-1. Wait for Hydra admin API to be ready
-2. Create/update OAuth2 clients via Admin API
-3. Example client creation:
-```bash
-curl -X POST http://hydra-admin:4445/admin/clients \
-  -H "Content-Type: application/json" \
-  -d '{
-    "client_id": "go-rest",
-    "client_secret": "go-rest-secret",
-    "grant_types": ["client_credentials"],
-    "token_endpoint_auth_method": "client_secret_post"
-  }'
-```
-
-### Step 5: Update APISIX OIDC Plugin Config
-
-Update `openid-pluginconfig.yaml` to use Hydra endpoints:
-```yaml
-discovery: http://hydra-public.hydra.svc.cluster.local:4444/.well-known/openid-configuration
-# Or for JWT validation only:
-jwks_uri: http://hydra-public.hydra.svc.cluster.local:4444/.well-known/jwks.json
-```
-
-### Step 6: Add Hydra HTTPRoute under /auth
-
-Expose Hydra endpoints under `/auth` path prefix via APISIX Gateway:
+The PostgreSQL cluster is defined in `hydra/postgres-cluster.yaml`:
 
 ```yaml
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
 metadata:
-  name: hydra-route
+  name: hydra-postgres
   namespace: hydra
 spec:
-  parentRefs:
-    - name: apisix-gateway
-      namespace: apisix
-  rules:
-    # /auth/.well-known/* → Hydra /.well-known/*
-    - matches:
-        - path: {type: PathPrefix, value: /auth/.well-known}
-      filters:
-        - type: URLRewrite
-          urlRewrite:
-            path:
-              type: ReplacePrefixMatch
-              replacePrefixMatch: /.well-known
-      backendRefs:
-        - name: hydra-public
-          namespace: hydra
-          port: 4444
-    # /auth/oauth2/token → Hydra /oauth2/token
-    - matches:
-        - path: {type: PathPrefix, value: /auth/oauth2}
-      filters:
-        - type: URLRewrite
-          urlRewrite:
-            path:
-              type: ReplacePrefixMatch
-              replacePrefixMatch: /oauth2
-      backendRefs:
-        - name: hydra-public
-          namespace: hydra
-          port: 4444
+  instances: 1  # Single instance for dev
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  storage:
+    size: 1Gi
+  bootstrap:
+    initdb:
+      database: hydra
+      owner: hydra
+      secret:
+        name: hydra-postgres-credentials
 ```
-
-**Exposed endpoints:**
-- `GET  /auth/.well-known/openid-configuration` → OIDC discovery
-- `GET  /auth/.well-known/jwks.json` → JWKS public keys
-- `POST /auth/oauth2/token` → Token endpoint (client_credentials grant)
-
-## Files to Create/Modify
-
-All new Hydra manifests go under `hydra/` directory:
-
-| File | Action | Purpose |
-|------|--------|---------|
-| `hydra/postgres-deployment.yaml` | Create | PostgreSQL 15 + PVC |
-| `hydra/postgres-service.yaml` | Create | PostgreSQL ClusterIP |
-| `hydra/hydra-deployment.yaml` | Create | Hydra pods |
-| `hydra/hydra-service.yaml` | Create | Hydra public/admin services |
-| `hydra/migration-job.yaml` | Create | DB schema migration |
-| `hydra/client-sync-job.yaml` | Create | Client sync from source of truth |
-| `hydra/hydra-route.yaml` | Create | HTTPRoute for /auth endpoints |
-| `openid-pluginconfig.yaml` | Modify | Point to Hydra JWKS |
-| `redeploy.sh` | Modify | Add Hydra deployment logic, reference hydra/ files |
-
-## Validation Steps
-
-After running `./redeploy.sh`:
-
-1. Check PostgreSQL: `kubectl get pods -n hydra -l app=hydra-postgres`
-2. Check Hydra: `kubectl get pods -n hydra -l app=hydra`
-3. Check migration job completed: `kubectl get jobs -n hydra`
-4. Verify OIDC discovery:
-   ```bash
-   kubectl run curl-test --rm -it --image=curlimages/curl --restart=Never -- \
-     curl http://hydra-public.hydra.svc.cluster.local:4444/.well-known/openid-configuration
-   ```
-5. Get token (via APISIX /auth path):
-   ```bash
-   # From inside cluster
-   kubectl run curl-test --rm -it --image=curlimages/curl --restart=Never -- \
-     curl -X POST http://apisix-gateway.apisix.svc.cluster.local/auth/oauth2/token \
-     -d "grant_type=client_credentials&client_id=go-rest&client_secret=go-rest-secret"
-
-   # External (kind NodePort)
-   curl -X POST http://<node-ip>:<nodeport>/auth/oauth2/token \
-     -d "grant_type=client_credentials&client_id=go-rest&client_secret=go-rest-secret"
-   ```
-6. Verify OIDC discovery via /auth:
-   ```bash
-   curl http://<node-ip>:<nodeport>/auth/.well-known/openid-configuration
-   ```
 
 ## Deployment Order in redeploy.sh
 
 ```
-1. kind cluster (existing)
-2. cert-manager (existing)
-3. APISIX Helm (existing)
-4. → Hydra PostgreSQL (NEW)
-5. → Hydra migration job (NEW)
-6. → Hydra deployment (NEW)
-7. → Hydra client sync (NEW)
-8. httpbin backend (existing)
-9. Gateway + HTTPRoutes (existing)
-10. OIDC plugin config (UPDATED to use Hydra)
-11. Connectivity probes (existing)
+1. Redis (rate limiting)
+2. CloudNativePG operator (cnpg-system namespace)
+3. Envoy Gateway (Helm)
+4. Gateway resources (GatewayClass, Gateway)
+5. Workloads (httpbin, go-rest-api)
+6. Hydra PostgreSQL cluster (CloudNativePG)
+7. Hydra (Helm) - includes automigration
+8. Hydra client sync job
+9. Hydra ReferenceGrant
+10. HTTPRoutes
+11. SecurityPolicy (JWT auth)
+12. Rate limit policy
 ```
 
-## Future: HA Upgrade Path
+## Envoy Gateway Integration
 
-When ready for production:
-1. Install CloudNativePG operator
-2. Create `Cluster` CRD with 3 replicas
-3. Update Hydra DSN to point to CloudNativePG service
-4. Scale Hydra to 3+ replicas
-5. Add PodDisruptionBudget
+### SecurityPolicy JWKS Configuration
 
-## Keycloak Removal
+The SecurityPolicy in `envoy-gateway/security-policy.yaml` uses `backendRefs` for internal JWKS fetching:
 
-Remove from `redeploy.sh`:
-- Lines 24-26: `KEYCLOAK_CONFIGMAP`, `KEYCLOAK_DEPLOYMENT`, `KEYCLOAK_SERVICE` variables
-- Lines 474-492: Keycloak deployment logic
-- Lines 494-498: OIDC plugin config referencing Keycloak
+```yaml
+spec:
+  jwt:
+    providers:
+    - name: hydra
+      issuer: http://hydra.local/auth
+      remoteJWKS:
+        uri: http://hydra-public.hydra.svc.cluster.local:4444/.well-known/jwks.json
+        backendRefs:
+        - name: hydra-public
+          namespace: hydra
+          port: 4444
+```
 
-Keycloak manifest files to delete (or archive):
-- `keycloak-realm-configmap.yaml`
-- `keycloak-deployment.yaml`
-- `keycloak-service.yaml`
+### ReferenceGrant for Cross-Namespace Access
+
+The `hydra/reference-grant.yaml` allows SecurityPolicy in default namespace to reference hydra-public Service:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-securitypolicy-jwks
+  namespace: hydra
+spec:
+  from:
+  - group: gateway.envoyproxy.io
+    kind: SecurityPolicy
+    namespace: default
+  to:
+  - group: ""
+    kind: Service
+    name: hydra-public
+```
+
+## Validation
+
+After running `./redeploy.sh`:
+
+1. Check CloudNativePG operator: `kubectl get pods -n cnpg-system`
+2. Check PostgreSQL cluster: `kubectl get cluster -n hydra`
+3. Check Hydra: `helm list -n hydra` and `kubectl get pods -n hydra`
+4. Run validation: `./validate-apitest.sh`
+
+Expected results:
+- httpbin (no auth): HTTP 200
+- API without creds: HTTP 401 (expected)
+- API with JWT: HTTP 200
+
+## OAuth2 Clients
+
+Clients are created by the `hydra-client-sync` job:
+
+| Client ID | Secret | Grant Type | Purpose |
+|-----------|--------|------------|---------|
+| `go-rest` | `go-rest-secret` | client_credentials | API authentication |
+| `demo-client` | `demo-secret` | client_credentials | Demo/testing |
+
+## Token Acquisition
+
+```bash
+# Get token from Hydra (via gateway)
+TOKEN=$(curl -s -X POST \
+  -d 'grant_type=client_credentials&client_id=go-rest&client_secret=go-rest-secret' \
+  http://localhost:8080/auth/oauth2/token | jq -r '.access_token')
+
+# Use token for authenticated request
+curl -H 'Host: apitest.local' \
+  -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/health-check
+```
 
 ## Notes
 
-- Hydra Admin API (port 4445) must never be exposed externally
-- Client secrets should be stored in Kubernetes Secrets, referenced by sync job
-- Consider using ExternalSecrets operator for production secret management
+- Hydra Admin API (port 4445) is internal-only, never exposed externally
+- JWT tokens are valid for 1 hour (configurable in helm-values.yaml)
+- `maester` (CRD-based client management) is disabled; clients are managed via Admin API
+- The `hydra.dev: true` setting is for local development only; remove for production

@@ -1,0 +1,50 @@
+image:
+  tag: v25.4.0
+
+hydra:
+  dev: true  # For local development only
+  automigration:
+    enabled: true
+    type: job
+  config:
+    dsn: postgres://hydra:hydra@hydra-postgres-rw.hydra.svc.cluster.local:5432/hydra?sslmode=disable
+    secrets:
+      system:
+        - "this-is-a-32-char-secret-for-dev"
+    urls:
+      self:
+        issuer: http://hydra.local/auth
+      login: http://localhost:3000/login      # Unused for M2M
+      consent: http://localhost:3000/consent  # Unused for M2M
+    strategies:
+      access_token: jwt
+    ttl:
+      access_token: 1h
+      refresh_token: 0s
+    oauth2:
+      expose_internal_errors: false
+      client_credentials:
+        default_grant_allowed_scope: true
+    log:
+      level: info
+      format: json
+
+deployment:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+service:
+  public:
+    type: ClusterIP
+    port: 4444
+  admin:
+    type: ClusterIP
+    port: 4445
+
+maester:
+  enabled: false  # Disable CRD-based client management

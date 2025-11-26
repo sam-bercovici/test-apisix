@@ -1,0 +1,32 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: tier1-burst-limit
+  namespace: envoy-gateway-system
+  annotations:
+    description: "Tier 1 burst rate limiting - 10 rps per org (client_id) with IP fallback"
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: forward-to-internal
+  rateLimit:
+    type: Global
+    global:
+      rules:
+      # Authenticated: 10 rps per org (client_id extracted from JWT)
+      - clientSelectors:
+        - headers:
+          - type: Distinct
+            name: x-org-id
+        limit:
+          requests: 10
+          unit: Second
+      # Unauthenticated fallback: 10 rps per IP
+      - clientSelectors:
+        - sourceCIDR:
+            type: Distinct
+            value: "0.0.0.0/0"
+        limit:
+          requests: 10
+          unit: Second

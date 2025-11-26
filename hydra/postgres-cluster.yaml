@@ -1,0 +1,26 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: hydra-postgres
+  namespace: hydra
+spec:
+  instances: 1  # Single instance for dev, increase for HA
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  storage:
+    size: 1Gi
+  bootstrap:
+    initdb:
+      database: hydra
+      owner: hydra
+      secret:
+        name: hydra-postgres-credentials
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hydra-postgres-credentials
+  namespace: hydra
+type: kubernetes.io/basic-auth
+stringData:
+  username: hydra
+  password: hydra

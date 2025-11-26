@@ -1,0 +1,31 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: jwt-auth
+  namespace: default
+  annotations:
+    description: "JWT authentication via Ory Hydra with client_id extraction for rate limiting"
+spec:
+  targetRefs:
+  # Only apply JWT auth to go-rest-route (apitest.local)
+  # httpbin.local remains unauthenticated
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: go-rest-route
+  jwt:
+    providers:
+    - name: hydra
+      issuer: "http://hydra.local/auth"
+      remoteJWKS:
+        uri: http://hydra-public.hydra.svc.cluster.local:4444/.well-known/jwks.json
+        backendRefs:
+        - name: hydra-public
+          namespace: hydra
+          port: 4444
+      claimToHeaders:
+      # Extract client_id as org identifier for rate limiting
+      - claim: client_id
+        header: x-org-id
+      # Extract subject for logging/debugging
+      - claim: sub
+        header: x-subject

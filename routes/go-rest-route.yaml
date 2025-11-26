@@ -1,19 +1,21 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: httpbin-route
+  name: go-rest-route
   namespace: default
+  annotations:
+    description: "Route for go-rest-api service with JWT authentication"
 spec:
   parentRefs:
-  - name: apisix-gateway
-    namespace: apisix
+  - name: eg-internal
+    namespace: envoy-gateway-system
   hostnames:
-  - "httpbin.local"
+  - "apitest.local"
   rules:
   - matches:
     - path:
         type: PathPrefix
         value: /
     backendRefs:
-    - name: httpbin
+    - name: go-rest-api-service
       port: 80

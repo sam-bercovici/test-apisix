@@ -4,62 +4,48 @@ set -euo pipefail
 ### configuration #############################################################
 CLUSTER_NAME="${CLUSTER_NAME:-kind}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-kind-${CLUSTER_NAME}}"
-APISIX_NAMESPACE="${APISIX_NAMESPACE:-apisix}"
-VALUES_FILE="${VALUES_FILE:-values-gateway.yaml}"
+
+# Envoy Gateway configuration
+ENVOY_GATEWAY_NAMESPACE="${ENVOY_GATEWAY_NAMESPACE:-envoy-gateway-system}"
+ENVOY_GATEWAY_RELEASE="${ENVOY_GATEWAY_RELEASE:-eg}"
+ENVOY_GATEWAY_VERSION="${ENVOY_GATEWAY_VERSION:-v1.6.0}"
+ENVOY_GATEWAY_VALUES="${ENVOY_GATEWAY_VALUES:-envoy-gateway/helm-values.yaml}"
+GATEWAY_CLASS_MANIFEST="${GATEWAY_CLASS_MANIFEST:-envoy-gateway/gateway-class.yaml}"
+GATEWAY_MANIFEST="${GATEWAY_MANIFEST:-envoy-gateway/gateway.yaml}"
+INTERNAL_GATEWAY_MANIFEST="${INTERNAL_GATEWAY_MANIFEST:-envoy-gateway/internal-gateway.yaml}"
+INTERNAL_BACKEND_MANIFEST="${INTERNAL_BACKEND_MANIFEST:-envoy-gateway/uds-backend.yaml}"
+EXTERNAL_FORWARD_ROUTE="${EXTERNAL_FORWARD_ROUTE:-envoy-gateway/external-forward-route.yaml}"
+SECURITY_POLICY_MANIFEST="${SECURITY_POLICY_MANIFEST:-envoy-gateway/security-policy.yaml}"
+TIER1_RATE_LIMIT_POLICY="${TIER1_RATE_LIMIT_POLICY:-envoy-gateway/tier1-rate-limit-policy.yaml}"
+TIER2_QUOTA_POLICY="${TIER2_QUOTA_POLICY:-envoy-gateway/tier2-quota-policy.yaml}"
+GATEWAY_NAME="${GATEWAY_NAME:-eg-gateway}"
+INTERNAL_GATEWAY_NAME="${INTERNAL_GATEWAY_NAME:-eg-internal}"
+
+# Redis configuration
+REDIS_NAMESPACE="${REDIS_NAMESPACE:-redis-system}"
+REDIS_MANIFEST="${REDIS_MANIFEST:-redis/deployment.yaml}"
+
+# Routes
+HTTPBIN_ROUTE_FILE="${HTTPBIN_ROUTE_FILE:-routes/httpbin-route.yaml}"
 HTTPBIN_NAMESPACE="${HTTPBIN_NAMESPACE:-default}"
-HTTPBIN_IMAGE="${HTTPBIN_IMAGE:-kennethreitz/httpbin}"
-HTTPBIN_ROUTE_NAME="${HTTPBIN_ROUTE_NAME:-httpbin-route}"
-GATEWAY_NAME="${GATEWAY_NAME:-apisix-gateway}"
-GATEWAY_MANIFEST="${GATEWAY_MANIFEST:-gateway.yaml}"
-HTTPBIN_ROUTE_FILE="${HTTPBIN_ROUTE_FILE:-httpbin-route.yaml}"
-EXTRA_API_DEPLOYMENT="${EXTRA_API_DEPLOYMENT:-api-deployment.yaml}"
-EXTRA_API_SERVICE="${EXTRA_API_SERVICE:-api-service.yaml}"
-GO_REST_APISIXROUTE_FILE="${GO_REST_APISIXROUTE_FILE:-go-rest-apisixroute.yaml}"
-GO_REST_APISIXROUTE_NAME="${GO_REST_APISIXROUTE_NAME:-go-rest-apisix}"
-GO_REST_APISIXROUTE_NAMESPACE="${GO_REST_APISIXROUTE_NAMESPACE:-default}"
-GO_REST_HTTPROUTE_FILE="${GO_REST_HTTPROUTE_FILE:-}"
-GO_REST_HTTPROUTE_NAME="${GO_REST_HTTPROUTE_NAME:-go-rest-route}"
-GO_REST_HTTPROUTE_NAMESPACE="${GO_REST_HTTPROUTE_NAMESPACE:-default}"
-GO_REST_CONSUMER_FILE="${GO_REST_CONSUMER_FILE:-go-rest-consumer.yaml}"
-# Hydra configuration (replaces Keycloak)
+GO_REST_ROUTE_FILE="${GO_REST_ROUTE_FILE:-routes/go-rest-route.yaml}"
+HYDRA_ROUTE_FILE="${HYDRA_ROUTE_FILE:-routes/hydra-route.yaml}"
+
+# Workloads
+HTTPBIN_MANIFEST="${HTTPBIN_MANIFEST:-workloads/httpbin.yaml}"
+GO_REST_API_MANIFEST="${GO_REST_API_MANIFEST:-workloads/go-rest-api.yaml}"
+WORKLOADS_NAMESPACE="${WORKLOADS_NAMESPACE:-default}"
+
+# Hydra configuration (Helm-based)
 HYDRA_NAMESPACE="${HYDRA_NAMESPACE:-hydra}"
-HYDRA_POSTGRES_DEPLOYMENT="${HYDRA_POSTGRES_DEPLOYMENT:-hydra/postgres-deployment.yaml}"
-HYDRA_POSTGRES_SERVICE="${HYDRA_POSTGRES_SERVICE:-hydra/postgres-service.yaml}"
-HYDRA_DEPLOYMENT="${HYDRA_DEPLOYMENT:-hydra/hydra-deployment.yaml}"
-HYDRA_SERVICE="${HYDRA_SERVICE:-hydra/hydra-service.yaml}"
-HYDRA_MIGRATION_JOB="${HYDRA_MIGRATION_JOB:-hydra/migration-job.yaml}"
+HYDRA_RELEASE="${HYDRA_RELEASE:-hydra}"
+HYDRA_VERSION="${HYDRA_VERSION:-0.52.0}"
+HYDRA_VALUES="${HYDRA_VALUES:-hydra/helm-values.yaml}"
+HYDRA_POSTGRES_CLUSTER="${HYDRA_POSTGRES_CLUSTER:-hydra/postgres-cluster.yaml}"
+HYDRA_REFERENCE_GRANT="${HYDRA_REFERENCE_GRANT:-hydra/reference-grant.yaml}"
 HYDRA_CLIENT_SYNC_JOB="${HYDRA_CLIENT_SYNC_JOB:-hydra/client-sync-job.yaml}"
-HYDRA_ROUTE="${HYDRA_ROUTE:-hydra/hydra-route.yaml}"
-OIDC_PLUGIN_CONFIG="${OIDC_PLUGIN_CONFIG:-openid-pluginconfig.yaml}"
-KEYAUTH_PLUGIN_CONFIG="${KEYAUTH_PLUGIN_CONFIG:-keyauth-pluginconfig.yaml}"
-PROMETHEUS_SERVICE_FILE="${PROMETHEUS_SERVICE_FILE:-apisix-prometheus-service.yaml}"
-PROMETHEUS_SERVICE_NAME="${PROMETHEUS_SERVICE_NAME:-apisix-prometheus}"
-PROMETHEUS_SERVICE_NAMESPACE="${PROMETHEUS_SERVICE_NAMESPACE:-apisix}"
-PROMETHEUS_PROBE_NAMESPACE="${PROMETHEUS_PROBE_NAMESPACE:-apisix}"
-LOCAL_TLS_MANIFEST="${LOCAL_TLS_MANIFEST:-apisix-local-tls.yaml}"
-LOCAL_TLS_CERTIFICATE_NAME="${LOCAL_TLS_CERTIFICATE_NAME:-apisix-local-wildcard}"
-LOCAL_TLS_SECRET_NAME="${LOCAL_TLS_SECRET_NAME:-apisix-local-wildcard-tls}"
-LOCAL_TLS_ISSUER_NAME="${LOCAL_TLS_ISSUER_NAME:-apisix-local-selfsigned}"
-LOCAL_TLS_NAMESPACE="${LOCAL_TLS_NAMESPACE:-${APISIX_NAMESPACE}}"
-APISIX_TLS_MANIFEST="${APISIX_TLS_MANIFEST:-apisix-tls-local.yaml}"
-CERT_MANAGER_RELEASE="${CERT_MANAGER_RELEASE:-cert-manager}"
-CERT_MANAGER_NAMESPACE="${CERT_MANAGER_NAMESPACE:-cert-manager}"
-CERT_MANAGER_HELM_REPO_NAME="${CERT_MANAGER_HELM_REPO_NAME:-jetstack}"
-CERT_MANAGER_HELM_REPO_URL="${CERT_MANAGER_HELM_REPO_URL:-https://charts.jetstack.io}"
-CERT_MANAGER_CHART="${CERT_MANAGER_CHART:-cert-manager}"
-CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-}"
-CERT_MANAGER_WAIT_TIMEOUT="${CERT_MANAGER_WAIT_TIMEOUT:-240}"
-CERT_MANAGER_CRDS=(
-  certificates.cert-manager.io
-  certificaterequests.cert-manager.io
-  challenges.acme.cert-manager.io
-  clusterissuers.cert-manager.io
-  issuers.cert-manager.io
-  orders.acme.cert-manager.io
-)
-HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-apisix}"
-HELM_REPO_NAME="${HELM_REPO_NAME:-apisix}"
-HELM_REPO_URL="${HELM_REPO_URL:-https://charts.apiseven.com}"
+
+# Test paths
 HTTPBIN_TEST_PATH="${HTTPBIN_TEST_PATH:-/status/200}"
 API_TEST_PATH="${API_TEST_PATH:-/health-check}"
 ###############################################################################
@@ -91,204 +77,52 @@ wait_for_deployment() {
   die "Deployment ${namespace}/${name} not found within ${timeout}s"
 }
 
-wait_for_gateway_condition() {
-  local condition=$1
-  local timeout=${2:-120}
+wait_for_gateway_programmed() {
+  local timeout=${1:-120}
   local end=$((SECONDS + timeout))
   while (( SECONDS < end )); do
-    local status
-    status="$(kubectl get gateway "${GATEWAY_NAME}" -n "${APISIX_NAMESPACE}" \
-      -o jsonpath="{.status.conditions[?(@.type==\"${condition}\")].status}" 2>/dev/null || true)"
+    local status reason
+    status="$(kubectl get gateway "${GATEWAY_NAME}" -n "${ENVOY_GATEWAY_NAMESPACE}" \
+      -o jsonpath="{.status.conditions[?(@.type==\"Programmed\")].status}" 2>/dev/null || true)"
+    reason="$(kubectl get gateway "${GATEWAY_NAME}" -n "${ENVOY_GATEWAY_NAMESPACE}" \
+      -o jsonpath="{.status.conditions[?(@.type==\"Programmed\")].reason}" 2>/dev/null || true)"
     if [[ "${status^^}" == *TRUE* ]]; then
-      log "Gateway ${GATEWAY_NAME} condition ${condition}=True"
+      log "Gateway ${GATEWAY_NAME} condition Programmed=True"
       return 0
+    fi
+    # In Kind clusters, LoadBalancer services remain pending but gateway is functional
+    # Accept AddressNotAssigned as success if the listener is programmed
+    if [[ "${reason}" == "AddressNotAssigned" ]]; then
+      local listener_status
+      listener_status="$(kubectl get gateway "${GATEWAY_NAME}" -n "${ENVOY_GATEWAY_NAMESPACE}" \
+        -o jsonpath="{.status.listeners[0].conditions[?(@.type==\"Programmed\")].status}" 2>/dev/null || true)"
+      if [[ "${listener_status^^}" == *TRUE* ]]; then
+        log "Gateway ${GATEWAY_NAME} listener is Programmed (AddressNotAssigned expected in Kind)"
+        return 0
+      fi
     fi
     sleep 4
   done
-  die "Timed out waiting for Gateway ${GATEWAY_NAME} condition ${condition}"
-}
-
-wait_for_route_attachment() {
-  local timeout=${1:-120}
-  local end=$((SECONDS + timeout))
-  while (( SECONDS < end )); do
-    local attached
-    attached="$(kubectl get gateway "${GATEWAY_NAME}" -n "${APISIX_NAMESPACE}" \
-      -o jsonpath='{.status.listeners[0].attachedRoutes}' 2>/dev/null || true)"
-    if [[ "${attached}" =~ ^[0-9]+$ && "${attached}" -ge 1 ]]; then
-      log "Gateway ${GATEWAY_NAME} reports ${attached} attached route(s)"
-      return 0
-    fi
-
-    local routeAccepted
-    routeAccepted="$(kubectl get httproute "${HTTPBIN_ROUTE_NAME}" -n "${HTTPBIN_NAMESPACE}" \
-      -o jsonpath="{.status.parents[?(@.parentRef.name==\"${GATEWAY_NAME}\")].conditions[?(@.type==\"Accepted\")].status}" 2>/dev/null || true)"
-    if [[ "${routeAccepted^^}" == *TRUE* ]]; then
-      log "HTTPRoute ${HTTPBIN_ROUTE_NAME} accepted by ${GATEWAY_NAME}; listener still reports ${attached:-0} route(s) – proceeding"
-      return 0
-    fi
-
-    sleep 4
-  done
-  die "Timed out waiting for HTTPRoute ${HTTPBIN_ROUTE_NAME} to attach to Gateway ${GATEWAY_NAME}"
-}
-
-wait_for_gateway_resource() {
-  local timeout=${1:-120}
-  local end=$((SECONDS + timeout))
-  while (( SECONDS < end )); do
-    if kubectl get gateway "${GATEWAY_NAME}" -n "${APISIX_NAMESPACE}" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 3
-  done
-  die "Gateway ${APISIX_NAMESPACE}/${GATEWAY_NAME} not found within ${timeout}s"
+  die "Timed out waiting for Gateway ${GATEWAY_NAME} to be Programmed"
 }
 
 wait_for_http_route_accepted() {
   local route=$1
   local namespace=$2
-  local timeout=${3:-120}
+  local gateway=${3:-${GATEWAY_NAME}}
+  local timeout=${4:-120}
   local end=$((SECONDS + timeout))
   while (( SECONDS < end )); do
     local status
     status="$(kubectl get httproute "${route}" -n "${namespace}" \
-      -o jsonpath="{.status.parents[?(@.parentRef.name==\"${GATEWAY_NAME}\")].conditions[?(@.type==\"Accepted\")].status}" 2>/dev/null || true)"
+      -o jsonpath="{.status.parents[?(@.parentRef.name==\"${gateway}\")].conditions[?(@.type==\"Accepted\")].status}" 2>/dev/null || true)"
     if [[ "${status^^}" == *TRUE* ]]; then
-      log "HTTPRoute ${namespace}/${route} accepted by ${GATEWAY_NAME}"
+      log "HTTPRoute ${namespace}/${route} accepted by ${gateway}"
       return 0
     fi
     sleep 4
   done
-  die "Timed out waiting for HTTPRoute ${namespace}/${route} to be accepted"
-}
-
-wait_for_apisixroute_accepted() {
-  local route=$1
-  local namespace=$2
-  local timeout=${3:-120}
-  local end=$((SECONDS + timeout))
-  while (( SECONDS < end )); do
-    local status
-    status="$(kubectl get apisixroute "${route}" -n "${namespace}" \
-      -o jsonpath="{.status.conditions[?(@.type==\"Accepted\")].status}" 2>/dev/null || true)"
-    if [[ "${status^^}" == *TRUE* ]]; then
-      log "ApisixRoute ${namespace}/${route} accepted"
-      return 0
-    fi
-    sleep 4
-  done
-  die "Timed out waiting for ApisixRoute ${namespace}/${route} to be accepted"
-}
-
-wait_for_crd_established() {
-  local crd=$1
-  local timeout=${2:-120}
-  local end=$((SECONDS + timeout))
-  while (( SECONDS < end )); do
-    if kubectl get crd "${crd}" >/dev/null 2>&1; then
-      local status
-      status="$(kubectl get crd "${crd}" -o jsonpath='{.status.conditions[?(@.type=="Established")].status}' 2>/dev/null || true)"
-      if [[ "${status^^}" == *TRUE* ]]; then
-        return 0
-      fi
-    fi
-    sleep 3
-  done
-  die "CRD ${crd} was not established within ${timeout}s"
-}
-
-wait_for_cert_manager_crds() {
-  local crd
-  for crd in "${CERT_MANAGER_CRDS[@]}"; do
-    wait_for_crd_established "${crd}" "${CERT_MANAGER_WAIT_TIMEOUT}"
-  done
-}
-
-wait_for_cert_manager_deployments() {
-  local deployments=(
-    cert-manager
-    cert-manager-cainjector
-    cert-manager-webhook
-  )
-  local deployment
-  for deployment in "${deployments[@]}"; do
-    wait_for_deployment "${CERT_MANAGER_NAMESPACE}" "${deployment}" "${CERT_MANAGER_WAIT_TIMEOUT}"
-    kubectl rollout status -n "${CERT_MANAGER_NAMESPACE}" \
-      "deployment/${deployment}" \
-      --timeout="${CERT_MANAGER_WAIT_TIMEOUT}s" >/dev/null
-  done
-}
-
-ensure_cert_manager_ready() {
-  if ! helm repo list | awk '{print $1}' | grep -Fxq "${CERT_MANAGER_HELM_REPO_NAME}"; then
-    log "Adding Helm repo ${CERT_MANAGER_HELM_REPO_NAME}"
-    helm repo add "${CERT_MANAGER_HELM_REPO_NAME}" "${CERT_MANAGER_HELM_REPO_URL}"
-  else
-    log "Helm repo ${CERT_MANAGER_HELM_REPO_NAME} already present"
-  fi
-
-  log "Updating Helm repo ${CERT_MANAGER_HELM_REPO_NAME}"
-  helm repo update "${CERT_MANAGER_HELM_REPO_NAME}" >/dev/null
-
-  local version_flag=()
-  if [[ -n "${CERT_MANAGER_VERSION}" ]]; then
-    version_flag=(--version "${CERT_MANAGER_VERSION}")
-  fi
-
-  log "Installing/Upgrading cert-manager Helm release ${CERT_MANAGER_RELEASE}"
-  helm upgrade --install "${CERT_MANAGER_RELEASE}" "${CERT_MANAGER_HELM_REPO_NAME}/${CERT_MANAGER_CHART}" \
-    -n "${CERT_MANAGER_NAMESPACE}" \
-    --create-namespace \
-    --set crds.enabled=true \
-    --wait \
-    "${version_flag[@]}"
-
-  wait_for_cert_manager_crds
-  wait_for_cert_manager_deployments
-}
-
-wait_for_secret() {
-  local namespace=$1
-  local name=$2
-  local timeout=${3:-120}
-  local end=$((SECONDS + timeout))
-  while (( SECONDS < end )); do
-    if kubectl get secret "${name}" -n "${namespace}" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 3
-  done
-  die "Secret ${namespace}/${name} not found within ${timeout}s"
-}
-
-apply_local_tls_resources() {
-  if [[ ! -f "${LOCAL_TLS_MANIFEST}" ]]; then
-    log "Skipping local TLS resources; manifest ${LOCAL_TLS_MANIFEST} not found"
-    return 0
-  fi
-
-  log "Applying local TLS issuer and certificate (${LOCAL_TLS_MANIFEST})"
-  kubectl apply -f "${LOCAL_TLS_MANIFEST}"
-
-  log "Waiting for Certificate ${LOCAL_TLS_NAMESPACE}/${LOCAL_TLS_CERTIFICATE_NAME} to be Ready"
-  kubectl wait \
-    --namespace "${LOCAL_TLS_NAMESPACE}" \
-    --for=condition=Ready \
-    --timeout="${CERT_MANAGER_WAIT_TIMEOUT}s" \
-    "certificate/${LOCAL_TLS_CERTIFICATE_NAME}" >/dev/null
-
-  wait_for_secret "${LOCAL_TLS_NAMESPACE}" "${LOCAL_TLS_SECRET_NAME}" "${CERT_MANAGER_WAIT_TIMEOUT}"
-}
-
-apply_apisix_tls_binding() {
-  if [[ ! -f "${APISIX_TLS_MANIFEST}" ]]; then
-    log "Skipping ApisixTls binding; manifest ${APISIX_TLS_MANIFEST} not found"
-    return 0
-  fi
-
-  log "Applying ApisixTls binding (${APISIX_TLS_MANIFEST})"
-  kubectl apply -f "${APISIX_TLS_MANIFEST}"
+  die "Timed out waiting for HTTPRoute ${namespace}/${route} to be accepted by ${gateway}"
 }
 
 wait_for_job_completion() {
@@ -313,6 +147,120 @@ wait_for_job_completion() {
   die "Job ${namespace}/${name} did not complete within ${timeout}s"
 }
 
+deploy_redis() {
+  if [[ ! -f "${REDIS_MANIFEST}" ]]; then
+    die "Redis manifest not found: ${REDIS_MANIFEST}"
+  fi
+
+  log "Deploying Redis for rate limiting (${REDIS_MANIFEST})"
+  kubectl apply -f "${REDIS_MANIFEST}"
+
+  wait_for_deployment "${REDIS_NAMESPACE}" "redis" 120
+  kubectl rollout status -n "${REDIS_NAMESPACE}" deployment/redis --timeout=120s >/dev/null
+  log "Redis is ready"
+}
+
+install_envoy_gateway() {
+  log "Installing Envoy Gateway ${ENVOY_GATEWAY_VERSION}"
+
+  local values_flag=()
+  if [[ -f "${ENVOY_GATEWAY_VALUES}" ]]; then
+    values_flag=(-f "${ENVOY_GATEWAY_VALUES}")
+  fi
+
+  helm upgrade --install "${ENVOY_GATEWAY_RELEASE}" \
+    oci://docker.io/envoyproxy/gateway-helm \
+    --version "${ENVOY_GATEWAY_VERSION}" \
+    -n "${ENVOY_GATEWAY_NAMESPACE}" \
+    --create-namespace \
+    "${values_flag[@]}"
+
+  wait_for_deployment "${ENVOY_GATEWAY_NAMESPACE}" "envoy-gateway" 180
+  kubectl rollout status -n "${ENVOY_GATEWAY_NAMESPACE}" \
+    deployment/envoy-gateway \
+    --timeout=180s >/dev/null
+  log "Envoy Gateway controller is ready"
+}
+
+wait_for_internal_gateway_programmed() {
+  local timeout=${1:-120}
+  local end=$((SECONDS + timeout))
+  while (( SECONDS < end )); do
+    local status reason
+    status="$(kubectl get gateway "${INTERNAL_GATEWAY_NAME}" -n "${ENVOY_GATEWAY_NAMESPACE}" \
+      -o jsonpath="{.status.conditions[?(@.type==\"Programmed\")].status}" 2>/dev/null || true)"
+    reason="$(kubectl get gateway "${INTERNAL_GATEWAY_NAME}" -n "${ENVOY_GATEWAY_NAMESPACE}" \
+      -o jsonpath="{.status.conditions[?(@.type==\"Programmed\")].reason}" 2>/dev/null || true)"
+    if [[ "${status^^}" == *TRUE* ]]; then
+      log "Gateway ${INTERNAL_GATEWAY_NAME} condition Programmed=True"
+      return 0
+    fi
+    if [[ "${reason}" == "AddressNotAssigned" ]]; then
+      local listener_status
+      listener_status="$(kubectl get gateway "${INTERNAL_GATEWAY_NAME}" -n "${ENVOY_GATEWAY_NAMESPACE}" \
+        -o jsonpath="{.status.listeners[0].conditions[?(@.type==\"Programmed\")].status}" 2>/dev/null || true)"
+      if [[ "${listener_status^^}" == *TRUE* ]]; then
+        log "Gateway ${INTERNAL_GATEWAY_NAME} listener is Programmed (AddressNotAssigned expected)"
+        return 0
+      fi
+    fi
+    sleep 4
+  done
+  die "Timed out waiting for Gateway ${INTERNAL_GATEWAY_NAME} to be Programmed"
+}
+
+apply_gateway_resources() {
+  if [[ -f "${GATEWAY_CLASS_MANIFEST}" ]]; then
+    log "Applying GatewayClass and EnvoyProxy (${GATEWAY_CLASS_MANIFEST})"
+    kubectl apply -f "${GATEWAY_CLASS_MANIFEST}"
+  fi
+
+  if [[ -f "${GATEWAY_MANIFEST}" ]]; then
+    log "Applying External Gateway (${GATEWAY_MANIFEST})"
+    kubectl apply -f "${GATEWAY_MANIFEST}"
+    wait_for_gateway_programmed 120
+  fi
+
+  if [[ -f "${INTERNAL_GATEWAY_MANIFEST}" ]]; then
+    log "Applying Internal Gateway (${INTERNAL_GATEWAY_MANIFEST})"
+    kubectl apply -f "${INTERNAL_GATEWAY_MANIFEST}"
+    wait_for_internal_gateway_programmed 120
+  fi
+}
+
+apply_two_tier_routing() {
+  # Apply internal backend service that routes to internal gateway pods
+  if [[ -f "${INTERNAL_BACKEND_MANIFEST}" ]]; then
+    log "Applying internal backend service (${INTERNAL_BACKEND_MANIFEST})"
+    kubectl apply -f "${INTERNAL_BACKEND_MANIFEST}"
+  fi
+
+  # Apply forward route: external gateway → internal gateway
+  if [[ -f "${EXTERNAL_FORWARD_ROUTE}" ]]; then
+    log "Applying external forward route to internal gateway (${EXTERNAL_FORWARD_ROUTE})"
+    kubectl apply -f "${EXTERNAL_FORWARD_ROUTE}"
+  fi
+}
+
+apply_security_policy() {
+  if [[ -f "${SECURITY_POLICY_MANIFEST}" ]]; then
+    log "Applying SecurityPolicy for JWT authentication (${SECURITY_POLICY_MANIFEST})"
+    kubectl apply -f "${SECURITY_POLICY_MANIFEST}"
+  fi
+}
+
+apply_rate_limit_policies() {
+  if [[ -f "${TIER1_RATE_LIMIT_POLICY}" ]]; then
+    log "Applying Tier 1 burst rate limit policy (${TIER1_RATE_LIMIT_POLICY})"
+    kubectl apply -f "${TIER1_RATE_LIMIT_POLICY}"
+  fi
+
+  if [[ -f "${TIER2_QUOTA_POLICY}" ]]; then
+    log "Applying Tier 2 daily quota policy (${TIER2_QUOTA_POLICY})"
+    kubectl apply -f "${TIER2_QUOTA_POLICY}"
+  fi
+}
+
 ensure_hydra_namespace() {
   if ! kubectl get namespace "${HYDRA_NAMESPACE}" >/dev/null 2>&1; then
     log "Creating namespace ${HYDRA_NAMESPACE}"
@@ -320,65 +268,71 @@ ensure_hydra_namespace() {
   fi
 }
 
+install_cnpg_operator() {
+  log "Installing CloudNativePG operator"
+  helm repo add cnpg https://cloudnative-pg.github.io/charts 2>/dev/null || true
+  helm repo update cnpg
+
+  helm upgrade --install cnpg cnpg/cloudnative-pg \
+    --namespace cnpg-system --create-namespace
+
+  wait_for_deployment "cnpg-system" "cnpg-cloudnative-pg" 180
+  kubectl rollout status -n cnpg-system deployment/cnpg-cloudnative-pg --timeout=180s >/dev/null
+  log "CloudNativePG operator is ready"
+}
+
 deploy_hydra_postgres() {
-  if [[ ! -f "${HYDRA_POSTGRES_DEPLOYMENT}" ]]; then
-    log "Skipping Hydra PostgreSQL; manifest ${HYDRA_POSTGRES_DEPLOYMENT} not found"
+  if [[ ! -f "${HYDRA_POSTGRES_CLUSTER}" ]]; then
+    log "Skipping Hydra PostgreSQL; manifest ${HYDRA_POSTGRES_CLUSTER} not found"
     return 1
   fi
 
   ensure_hydra_namespace
 
-  log "Deploying Hydra PostgreSQL (${HYDRA_POSTGRES_DEPLOYMENT})"
-  kubectl apply -f "${HYDRA_POSTGRES_DEPLOYMENT}"
+  log "Creating Hydra PostgreSQL cluster (${HYDRA_POSTGRES_CLUSTER})"
+  kubectl apply -f "${HYDRA_POSTGRES_CLUSTER}"
 
-  if [[ -f "${HYDRA_POSTGRES_SERVICE}" ]]; then
-    log "Applying Hydra PostgreSQL service (${HYDRA_POSTGRES_SERVICE})"
-    kubectl apply -f "${HYDRA_POSTGRES_SERVICE}"
-  fi
-
-  wait_for_deployment "${HYDRA_NAMESPACE}" "hydra-postgres" 180
-  kubectl rollout status -n "${HYDRA_NAMESPACE}" deployment/hydra-postgres --timeout=180s >/dev/null
-  log "Hydra PostgreSQL is ready"
-}
-
-run_hydra_migrations() {
-  if [[ ! -f "${HYDRA_MIGRATION_JOB}" ]]; then
-    log "Skipping Hydra migrations; manifest ${HYDRA_MIGRATION_JOB} not found"
-    return 0
-  fi
-
-  # Delete previous job if exists (jobs are immutable)
-  kubectl delete job hydra-migrate -n "${HYDRA_NAMESPACE}" --ignore-not-found=true >/dev/null 2>&1
-
-  log "Running Hydra database migrations (${HYDRA_MIGRATION_JOB})"
-  kubectl apply -f "${HYDRA_MIGRATION_JOB}"
-  wait_for_job_completion "${HYDRA_NAMESPACE}" "hydra-migrate" 180
+  log "Waiting for PostgreSQL cluster to be ready"
+  local timeout=180
+  local end=$((SECONDS + timeout))
+  while (( SECONDS < end )); do
+    local ready
+    ready="$(kubectl get cluster hydra-postgres -n "${HYDRA_NAMESPACE}" \
+      -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    if [[ "${ready}" == "Cluster in healthy state" ]]; then
+      log "Hydra PostgreSQL cluster is ready"
+      return 0
+    fi
+    sleep 5
+  done
+  die "Hydra PostgreSQL cluster did not become ready within ${timeout}s"
 }
 
 deploy_hydra() {
-  if [[ ! -f "${HYDRA_DEPLOYMENT}" ]]; then
-    log "Skipping Hydra deployment; manifest ${HYDRA_DEPLOYMENT} not found"
+  if [[ ! -f "${HYDRA_VALUES}" ]]; then
+    log "Skipping Hydra; values file ${HYDRA_VALUES} not found"
     return 1
   fi
 
-  log "Deploying Ory Hydra (${HYDRA_DEPLOYMENT})"
-  kubectl apply -f "${HYDRA_DEPLOYMENT}"
+  log "Adding Ory Helm repository"
+  helm repo add ory https://k8s.ory.sh/helm/charts 2>/dev/null || true
+  helm repo update ory
 
-  if [[ -f "${HYDRA_SERVICE}" ]]; then
-    log "Applying Hydra services (${HYDRA_SERVICE})"
-    kubectl apply -f "${HYDRA_SERVICE}"
-  fi
+  log "Installing Ory Hydra ${HYDRA_VERSION}"
+  helm upgrade --install "${HYDRA_RELEASE}" ory/hydra \
+    --version "${HYDRA_VERSION}" \
+    --namespace "${HYDRA_NAMESPACE}" \
+    -f "${HYDRA_VALUES}"
 
   wait_for_deployment "${HYDRA_NAMESPACE}" "hydra" 180
   kubectl rollout status -n "${HYDRA_NAMESPACE}" deployment/hydra --timeout=180s >/dev/null
   log "Ory Hydra is ready"
+}
 
-  # Print access info
-  local node_ip
-  node_ip="$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
-  if [[ -n "${node_ip}" ]]; then
-    log "Hydra public API available at http://${node_ip}:30444/"
-    log "OIDC discovery: http://${node_ip}:30444/.well-known/openid-configuration"
+apply_hydra_reference_grant() {
+  if [[ -f "${HYDRA_REFERENCE_GRANT}" ]]; then
+    log "Applying Hydra ReferenceGrant (${HYDRA_REFERENCE_GRANT})"
+    kubectl apply -f "${HYDRA_REFERENCE_GRANT}"
   fi
 }
 
@@ -397,99 +351,98 @@ sync_hydra_clients() {
   log "OAuth2 clients synced (go-rest, demo-client)"
 }
 
-apply_hydra_route() {
-  if [[ ! -f "${HYDRA_ROUTE}" ]]; then
-    log "Skipping Hydra HTTPRoute; manifest ${HYDRA_ROUTE} not found"
-    return 0
+deploy_workloads() {
+  if [[ -f "${HTTPBIN_MANIFEST}" ]]; then
+    log "Deploying httpbin (${HTTPBIN_MANIFEST})"
+    kubectl apply -n "${WORKLOADS_NAMESPACE}" -f "${HTTPBIN_MANIFEST}"
+    kubectl wait --for=condition=Available deployment/httpbin \
+      -n "${WORKLOADS_NAMESPACE}" --timeout=120s >/dev/null
+    log "httpbin is ready"
   fi
 
-  log "Applying Hydra HTTPRoute (${HYDRA_ROUTE})"
-  kubectl apply -f "${HYDRA_ROUTE}"
-  wait_for_http_route_accepted "hydra-route" "${HYDRA_NAMESPACE}" 120
+  if [[ -f "${GO_REST_API_MANIFEST}" ]]; then
+    log "Deploying go-rest-api (${GO_REST_API_MANIFEST})"
+    kubectl apply -n "${WORKLOADS_NAMESPACE}" -f "${GO_REST_API_MANIFEST}"
+    kubectl wait --for=condition=Available deployment/go-rest-api \
+      -n "${WORKLOADS_NAMESPACE}" --timeout=120s >/dev/null
+    log "go-rest-api is ready"
+  fi
 }
 
+apply_routes() {
+  # Routes now attach to internal gateway (eg-internal)
+  if [[ -f "${HTTPBIN_ROUTE_FILE}" ]]; then
+    log "Applying httpbin HTTPRoute (${HTTPBIN_ROUTE_FILE})"
+    kubectl apply -f "${HTTPBIN_ROUTE_FILE}"
+    wait_for_http_route_accepted "httpbin-route" "${HTTPBIN_NAMESPACE}" "${INTERNAL_GATEWAY_NAME}" 120
+  fi
+
+  if [[ -f "${GO_REST_ROUTE_FILE}" ]]; then
+    log "Applying go-rest HTTPRoute (${GO_REST_ROUTE_FILE})"
+    kubectl apply -f "${GO_REST_ROUTE_FILE}"
+    wait_for_http_route_accepted "go-rest-route" "default" "${INTERNAL_GATEWAY_NAME}" 120
+  fi
+
+  if [[ -f "${HYDRA_ROUTE_FILE}" ]]; then
+    log "Applying Hydra HTTPRoute (${HYDRA_ROUTE_FILE})"
+    kubectl apply -f "${HYDRA_ROUTE_FILE}"
+    wait_for_http_route_accepted "hydra-route" "${HYDRA_NAMESPACE}" "${INTERNAL_GATEWAY_NAME}" 120
+  fi
+}
+
+
 run_connectivity_probe() {
-  log "Probing httpbin route through APISIX (expect 200)"
+  log "Probing httpbin route through Envoy Gateway (expect 200)"
+  local svc_name
+  svc_name="$(kubectl get svc -n "${ENVOY_GATEWAY_NAMESPACE}" -l gateway.envoyproxy.io/owning-gateway-name="${GATEWAY_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  if [[ -z "${svc_name}" ]]; then
+    svc_name="envoy-${GATEWAY_NAME}-envoy-gateway-system"
+  fi
+  local url="http://${svc_name}.${ENVOY_GATEWAY_NAMESPACE}.svc.cluster.local${HTTPBIN_TEST_PATH}"
+  echo "# curl -H 'Host: httpbin.local' ${url}"
   local output status
-  local url="http://${GATEWAY_NAME}.${APISIX_NAMESPACE}.svc.cluster.local${HTTPBIN_TEST_PATH}"
-  echo "# curl -v -H 'Host: httpbin.local' ${url}"
-  output="$(kubectl run curl-test --rm \
-    --image=curlimages/curl \
+  # Use busybox with wget since curlimages/curl has entrypoint issues with --command
+  output="$(kubectl run curl-test --rm -i \
+    --image=busybox:1.36 \
     --restart=Never \
     --namespace "${HTTPBIN_NAMESPACE}" \
-    --command -- \
-      /bin/sh -c 'code=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: httpbin.local" '"$url"'); echo "$code"' \
+    -- sh -c 'wget -q -O /dev/null -S --header="Host: httpbin.local" "'"${url}"'" 2>&1 | head -1 | grep -o "[0-9][0-9][0-9]"' \
     2>&1)"
-  status="$(printf '%s\n' "$output" | sed -n 's/^\([0-9][0-9]*\).*/\1/p' | head -n1)"
+  status="$(printf '%s\n' "$output" | grep -o '^[0-9][0-9][0-9]' | head -n1)"
   if [[ "${status}" != "200" ]]; then
     die "Connectivity probe returned ${status:-<empty>} (full output: ${output})"
   fi
   log "Connectivity probe succeeded (200)"
 }
 
-run_prometheus_probe() {
-  local svc="${PROMETHEUS_SERVICE_NAME}"
-  local ns="${PROMETHEUS_SERVICE_NAMESPACE}"
-  local probe_ns="${PROMETHEUS_PROBE_NAMESPACE}"
-  local url="http://${svc}.${ns}.svc.cluster.local:9091/apisix/prometheus/metrics"
-  local pod="curl-prometheus-$RANDOM"
-  log "Probing APISIX Prometheus metrics endpoint"
-  echo "# curl ${url}"
-  local output status=0
-  output="$(kubectl run "${pod}" --rm --image=curlimages/curl --restart=Never \
-    --namespace "${probe_ns}" --command -- /bin/sh -c "curl -sSf '${url}' | head -n 5" 2>&1)" || status=$?
-  if (( status != 0 )); then
-    die "Prometheus metrics probe failed (exit ${status}): ${output}"
-  fi
-  printf '%s\n' "${output}"
-  log "Prometheus metrics endpoint reachable"
-}
-
 print_external_curl_hint() {
   local node_ip
   node_ip="$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
+
+  local svc_name
+  svc_name="$(kubectl get svc -n "${ENVOY_GATEWAY_NAMESPACE}" -l gateway.envoyproxy.io/owning-gateway-name="${GATEWAY_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  if [[ -z "${svc_name}" ]]; then
+    svc_name="envoy-${GATEWAY_NAME}-envoy-gateway-system"
+  fi
+
   local node_port
-  node_port="$(kubectl get svc "${HELM_RELEASE_NAME}-gateway" -n "${APISIX_NAMESPACE}" \
+  node_port="$(kubectl get svc "${svc_name}" -n "${ENVOY_GATEWAY_NAMESPACE}" \
     -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}' 2>/dev/null || true)"
   node_port="${node_port%% *}"
-  if [[ -z "${node_port}" ]]; then
-    node_port="$(kubectl get svc "${HELM_RELEASE_NAME}-gateway" -n "${APISIX_NAMESPACE}" \
-      -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}' 2>/dev/null || true)"
-    node_port="${node_port%% *}"
-  fi
-  if [[ -z "${node_port}" ]]; then
-    node_port="$(kubectl get svc "${HELM_RELEASE_NAME}-gateway" -n "${APISIX_NAMESPACE}" \
-      -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || true)"
-  fi
-  local https_node_port
-  https_node_port="$(kubectl get svc "${HELM_RELEASE_NAME}-gateway" -n "${APISIX_NAMESPACE}" \
-    -o jsonpath='{.spec.ports[?(@.port==443)].nodePort}' 2>/dev/null || true)"
-  https_node_port="${https_node_port%% *}"
-  if [[ -z "${https_node_port}" ]]; then
-    https_node_port="$(kubectl get svc "${HELM_RELEASE_NAME}-gateway" -n "${APISIX_NAMESPACE}" \
-      -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}' 2>/dev/null || true)"
-    https_node_port="${https_node_port%% *}"
-  fi
-  if [[ -z "${https_node_port}" ]]; then
-    https_node_port="$(kubectl get svc "${HELM_RELEASE_NAME}-gateway" -n "${APISIX_NAMESPACE}" \
-      -o jsonpath='{.spec.ports[?(@.name=="apisix-gateway-tls")].nodePort}' 2>/dev/null || true)"
-    https_node_port="${https_node_port%% *}"
-  fi
+
   if [[ -n "${node_ip}" && -n "${node_port}" ]]; then
-    echo "# External (httpbin): curl -v -H 'Host: httpbin.local' http://${node_ip}:${node_port}${HTTPBIN_TEST_PATH}"
-    echo "# External (apitest): curl -v -H 'Host: apitest.local' http://${node_ip}:${node_port}${API_TEST_PATH}"
+    echo ""
+    echo "# External access examples:"
+    echo "# httpbin:  curl -v -H 'Host: httpbin.local' http://${node_ip}:${node_port}${HTTPBIN_TEST_PATH}"
+    echo "# apitest:  curl -v -H 'Host: apitest.local' http://${node_ip}:${node_port}${API_TEST_PATH}"
+    echo ""
+    echo "# Get JWT token from Hydra:"
+    echo "# TOKEN=\$(curl -s -X POST -d 'grant_type=client_credentials&client_id=go-rest&client_secret=go-rest-secret' http://${node_ip}:${node_port}/auth/oauth2/token | jq -r '.access_token')"
+    echo ""
+    echo "# Authenticated request:"
+    echo "# curl -H 'Host: apitest.local' -H \"Authorization: Bearer \$TOKEN\" http://${node_ip}:${node_port}${API_TEST_PATH}"
   else
     log "Could not determine NodePort or node IP for external curl hint"
-  fi
-  if [[ -n "${node_ip}" && -n "${https_node_port}" ]]; then
-    cat <<EOF
-# External TLS (httpbin via --resolve):
-curl -vk --resolve httpbin.local:${https_node_port}:${node_ip} https://httpbin.local:${https_node_port}${HTTPBIN_TEST_PATH}
-# External TLS (apitest via --resolve):
-curl -vk --resolve apitest.local:${https_node_port}:${node_ip} https://apitest.local:${https_node_port}${API_TEST_PATH}
-EOF
-  else
-    log "HTTPS NodePort not detected; ensure the service exposes port 443 before testing TLS"
   fi
 }
 
@@ -511,176 +464,44 @@ main() {
   log "Waiting for control-plane node to be Ready"
   kubectl wait --context "${KUBE_CONTEXT}" --for=condition=Ready node --all --timeout=180s >/dev/null
 
-  log "Ensuring cert-manager (Jetstack) is installed and ready"
-  ensure_cert_manager_ready
+  # Phase 1: Infrastructure
+  deploy_redis
+  install_cnpg_operator
+  install_envoy_gateway
 
-  if ! helm repo list | awk '{print $1}' | grep -Fxq "${HELM_REPO_NAME}"; then
-    log "Adding Helm repo ${HELM_REPO_NAME}"
-    helm repo add "${HELM_REPO_NAME}" "${HELM_REPO_URL}"
-  else
-    log "Helm repo ${HELM_REPO_NAME} already present"
-  fi
+  # Phase 2: Gateway Resources
+  apply_gateway_resources
 
-  log "Updating Helm repo ${HELM_REPO_NAME}"
-  helm repo update "${HELM_REPO_NAME}" >/dev/null
+  # Phase 3: Two-Tier Routing (external → internal gateway)
+  apply_two_tier_routing
 
-  [[ -f "${VALUES_FILE}" ]] || die "Values file not found: ${VALUES_FILE}"
+  # Deploy workloads (httpbin, go-rest-api)
+  deploy_workloads
 
-  log "Installing/Upgrading APISIX Helm release ${HELM_RELEASE_NAME}"
-  helm upgrade --install "${HELM_RELEASE_NAME}" "${HELM_REPO_NAME}/apisix" \
-    -f "${VALUES_FILE}" \
-    -n "${APISIX_NAMESPACE}" \
-    --create-namespace
-
-  wait_for_deployment "${APISIX_NAMESPACE}" "${HELM_RELEASE_NAME}"
-  log "Waiting for APISIX dataplane deployment rollout"
-  kubectl rollout status -n "${APISIX_NAMESPACE}" \
-    "deployment/${HELM_RELEASE_NAME}" \
-    --timeout=180s >/dev/null
-
-  wait_for_deployment "${APISIX_NAMESPACE}" "${HELM_RELEASE_NAME}-ingress-controller"
-  log "Waiting for APISIX ingress-controller deployment rollout"
-  kubectl rollout status -n "${APISIX_NAMESPACE}" \
-    "deployment/${HELM_RELEASE_NAME}-ingress-controller" \
-    --timeout=180s >/dev/null
-
-  apply_local_tls_resources
-  apply_apisix_tls_binding
-
-  log "Deploying httpbin backend (deployment + service)"
-  cat <<EOF | kubectl apply -n "${HTTPBIN_NAMESPACE}" -f -
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: httpbin
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: httpbin
-  template:
-    metadata:
-      labels:
-        app: httpbin
-    spec:
-      containers:
-        - name: httpbin
-          image: ${HTTPBIN_IMAGE}
-          ports:
-            - containerPort: 80
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: httpbin
-spec:
-  selector:
-    app: httpbin
-  ports:
-    - name: http
-      port: 80
-      targetPort: 80
-EOF
-
-  log "Waiting for httpbin deployment to become available"
-  kubectl wait --for=condition=Available deployment/httpbin \
-    -n "${HTTPBIN_NAMESPACE}" --timeout=120s >/dev/null
-
-  [[ -f "${GATEWAY_MANIFEST}" ]] || die "Gateway manifest not found: ${GATEWAY_MANIFEST}"
-  log "Applying Gateway resources from ${GATEWAY_MANIFEST}"
-  kubectl apply -f "${GATEWAY_MANIFEST}"
-
-  [[ -f "${HTTPBIN_ROUTE_FILE}" ]] || die "HTTPRoute manifest not found: ${HTTPBIN_ROUTE_FILE}"
-  log "Applying httpbin HTTPRoute from ${HTTPBIN_ROUTE_FILE}"
-  kubectl apply -f "${HTTPBIN_ROUTE_FILE}"
-
-  # Deploy Ory Hydra (replaces Keycloak)
+  # Deploy Hydra OAuth2 stack (Helm-based with CloudNativePG)
   deploy_hydra_postgres
-  run_hydra_migrations
   deploy_hydra
   sync_hydra_clients
-  apply_hydra_route
+  apply_hydra_reference_grant
 
-  if [[ -f "${OIDC_PLUGIN_CONFIG}" ]]; then
-    log "Applying APISIX OIDC plugin config (${OIDC_PLUGIN_CONFIG})"
-    kubectl apply -f "${OIDC_PLUGIN_CONFIG}"
-    log "OAuth2 client 'go-rest' (secret: go-rest-secret) is configured in Hydra."
-  fi
-  if [[ -f "${KEYAUTH_PLUGIN_CONFIG}" ]]; then
-    log "Applying APISIX key-auth plugin config (${KEYAUTH_PLUGIN_CONFIG})"
-    kubectl apply -f "${KEYAUTH_PLUGIN_CONFIG}"
-  fi
-  if [[ -f "${GO_REST_CONSUMER_FILE}" ]]; then
-    log "Applying go-rest API key consumer (${GO_REST_CONSUMER_FILE})"
-    kubectl apply -f "${GO_REST_CONSUMER_FILE}"
-    log "API key auth enabled as alternative for apitest.local (consumer: demo, header: X-API-Key, default key: go-rest-demo-key)"
-  fi
-  if [[ -f "${PROMETHEUS_SERVICE_FILE}" ]]; then
-    log "Applying APISIX Prometheus service (${PROMETHEUS_SERVICE_FILE})"
-    kubectl apply -f "${PROMETHEUS_SERVICE_FILE}"
-  fi
+  # Phase 4: Routes (must exist before policies that target them)
+  apply_routes
 
-  if [[ -f "${EXTRA_API_DEPLOYMENT}" ]]; then
-    log "Applying extra API deployment (${EXTRA_API_DEPLOYMENT})"
-    kubectl apply -f "${EXTRA_API_DEPLOYMENT}"
-    local extra_name extra_ns
-    extra_name="$(kubectl get -f "${EXTRA_API_DEPLOYMENT}" -o jsonpath='{.metadata.name}' 2>/dev/null || true)"
-    extra_ns="$(kubectl get -f "${EXTRA_API_DEPLOYMENT}" -o jsonpath='{.metadata.namespace}' 2>/dev/null || true)"
-    [[ -n "${extra_ns}" ]] || extra_ns="default"
-    if [[ -n "${extra_name}" ]]; then
-      wait_for_deployment "${extra_ns}" "${extra_name}" 120
-      kubectl rollout status -n "${extra_ns}" "deployment/${extra_name}" --timeout=180s >/dev/null
-    fi
-  fi
-  if [[ -f "${EXTRA_API_SERVICE}" ]]; then
-    log "Applying extra API service (${EXTRA_API_SERVICE})"
-    kubectl apply -f "${EXTRA_API_SERVICE}"
-  fi
-  if [[ -f "${GO_REST_APISIXROUTE_FILE}" ]]; then
-    log "Applying go-rest ApisixRoute (${GO_REST_APISIXROUTE_FILE})"
-    kubectl apply -f "${GO_REST_APISIXROUTE_FILE}"
-    wait_for_apisixroute_accepted "${GO_REST_APISIXROUTE_NAME}" "${GO_REST_APISIXROUTE_NAMESPACE}" 180
-  fi
-  if [[ -n "${GO_REST_HTTPROUTE_FILE}" && -f "${GO_REST_HTTPROUTE_FILE}" ]]; then
-    log "Applying go-rest HTTPRoute (${GO_REST_HTTPROUTE_FILE})"
-    kubectl apply -f "${GO_REST_HTTPROUTE_FILE}"
-    wait_for_http_route_accepted "${GO_REST_HTTPROUTE_NAME}" "${GO_REST_HTTPROUTE_NAMESPACE}" 180
-  fi
+  # Phase 5: Security Policy (targets HTTPRoute, so routes must exist first)
+  apply_security_policy
 
-  wait_for_gateway_resource 180
-  wait_for_gateway_condition "Accepted"
-  wait_for_route_attachment
+  # Phase 6: Rate Limiting (two-tier: burst + daily quota)
+  apply_rate_limit_policies
+
+  # Validation
   print_external_curl_hint
   run_connectivity_probe
 
-  log "Probing go-rest API route through APISIX (expect 200)"
-  local url_api="http://${GATEWAY_NAME}.${APISIX_NAMESPACE}.svc.cluster.local${API_TEST_PATH}"
-  echo "# curl -v -H 'Host: apitest.local' ${url_api}"
-  local output_api status_api
-  output_api="$(kubectl run curl-test-api --rm --image=curlimages/curl --restart=Never --namespace "${HTTPBIN_NAMESPACE}" --command -- /bin/sh -c "curl -s -o /dev/null -w '%{http_code}' -H 'Host: apitest.local' '${url_api}'" 2>&1 || true)"
-  status_api="$(printf '%s\n' "$output_api" | sed -n 's/^\([0-9][0-9]*\).*/\1/p' | head -n1)"
-  case "${status_api}" in
-    200)
-      log "Go-rest API probe succeeded (200)"
-      ;;
-    302)
-      log "Go-rest API probe returned 302 (unauthenticated clients are redirected to auth)"
-      ;;
-    401)
-      log "Go-rest API probe returned 401 (expected for unauthenticated requests)"
-      ;;
-    *)
-      die "Go-rest connectivity probe returned ${status_api:-<empty>} (full output: ${output_api})"
-      ;;
-  esac
-
-  if kubectl get svc "${PROMETHEUS_SERVICE_NAME}" -n "${PROMETHEUS_SERVICE_NAMESPACE}" >/dev/null 2>&1; then
-    run_prometheus_probe
-  else
-    log "Skipping Prometheus metrics probe; service ${PROMETHEUS_SERVICE_NAMESPACE}/${PROMETHEUS_SERVICE_NAME} not found"
-  fi
-
-  log "Deployment complete."
+  log ""
+  log "Deployment complete!"
+  log ""
+  log "Resources deployed:"
+  kubectl get gateway,httproute,securitypolicy,backendtrafficpolicy -A 2>/dev/null || true
 }
 
 main "$@"
