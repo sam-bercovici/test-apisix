@@ -1,0 +1,72 @@
+# PostgreSQL deployment for Ory Hydra (dev setup - single pod)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hydra-postgres-pvc
+  namespace: hydra
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hydra-postgres-secret
+  namespace: hydra
+type: Opaque
+stringData:
+  POSTGRES_USER: hydra
+  POSTGRES_PASSWORD: hydra
+  POSTGRES_DB: hydra
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hydra-postgres
+  namespace: hydra
+  labels:
+    app: hydra-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hydra-postgres
+  template:
+    metadata:
+      labels:
+        app: hydra-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: hydra-postgres-secret
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - hydra
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - hydra
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: hydra-postgres-pvc

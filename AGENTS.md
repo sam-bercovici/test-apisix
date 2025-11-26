@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## Documents
+- `plans\` - plans should be stored in this directory
+- `requirements` - requirements documents should be stored in this directory
+
 ## Project Structure & Module Organization
 This repository packages Apache APISIX Gateway API manifests for routing demo services.
 - `gateway.yaml` declares the `GatewayClass` and `Gateway` infrastructure resources that enable Gateway API routing.

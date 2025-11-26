@@ -21,9 +21,15 @@ GO_REST_HTTPROUTE_FILE="${GO_REST_HTTPROUTE_FILE:-}"
 GO_REST_HTTPROUTE_NAME="${GO_REST_HTTPROUTE_NAME:-go-rest-route}"
 GO_REST_HTTPROUTE_NAMESPACE="${GO_REST_HTTPROUTE_NAMESPACE:-default}"
 GO_REST_CONSUMER_FILE="${GO_REST_CONSUMER_FILE:-go-rest-consumer.yaml}"
-KEYCLOAK_CONFIGMAP="${KEYCLOAK_CONFIGMAP:-keycloak-realm-configmap.yaml}"
-KEYCLOAK_DEPLOYMENT="${KEYCLOAK_DEPLOYMENT:-keycloak-deployment.yaml}"
-KEYCLOAK_SERVICE="${KEYCLOAK_SERVICE:-keycloak-service.yaml}"
+# Hydra configuration (replaces Keycloak)
+HYDRA_NAMESPACE="${HYDRA_NAMESPACE:-hydra}"
+HYDRA_POSTGRES_DEPLOYMENT="${HYDRA_POSTGRES_DEPLOYMENT:-hydra/postgres-deployment.yaml}"
+HYDRA_POSTGRES_SERVICE="${HYDRA_POSTGRES_SERVICE:-hydra/postgres-service.yaml}"
+HYDRA_DEPLOYMENT="${HYDRA_DEPLOYMENT:-hydra/hydra-deployment.yaml}"
+HYDRA_SERVICE="${HYDRA_SERVICE:-hydra/hydra-service.yaml}"
+HYDRA_MIGRATION_JOB="${HYDRA_MIGRATION_JOB:-hydra/migration-job.yaml}"
+HYDRA_CLIENT_SYNC_JOB="${HYDRA_CLIENT_SYNC_JOB:-hydra/client-sync-job.yaml}"
+HYDRA_ROUTE="${HYDRA_ROUTE:-hydra/hydra-route.yaml}"
 OIDC_PLUGIN_CONFIG="${OIDC_PLUGIN_CONFIG:-openid-pluginconfig.yaml}"
 KEYAUTH_PLUGIN_CONFIG="${KEYAUTH_PLUGIN_CONFIG:-keyauth-pluginconfig.yaml}"
 PROMETHEUS_SERVICE_FILE="${PROMETHEUS_SERVICE_FILE:-apisix-prometheus-service.yaml}"
@@ -285,6 +291,123 @@ apply_apisix_tls_binding() {
   kubectl apply -f "${APISIX_TLS_MANIFEST}"
 }
 
+wait_for_job_completion() {
+  local namespace=$1
+  local name=$2
+  local timeout=${3:-180}
+  local end=$((SECONDS + timeout))
+  while (( SECONDS < end )); do
+    local succeeded
+    succeeded="$(kubectl get job "${name}" -n "${namespace}" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
+    if [[ "${succeeded}" == "1" ]]; then
+      log "Job ${namespace}/${name} completed successfully"
+      return 0
+    fi
+    local failed
+    failed="$(kubectl get job "${name}" -n "${namespace}" -o jsonpath='{.status.failed}' 2>/dev/null || true)"
+    if [[ -n "${failed}" && "${failed}" -ge 3 ]]; then
+      die "Job ${namespace}/${name} failed after ${failed} attempts"
+    fi
+    sleep 5
+  done
+  die "Job ${namespace}/${name} did not complete within ${timeout}s"
+}
+
+ensure_hydra_namespace() {
+  if ! kubectl get namespace "${HYDRA_NAMESPACE}" >/dev/null 2>&1; then
+    log "Creating namespace ${HYDRA_NAMESPACE}"
+    kubectl create namespace "${HYDRA_NAMESPACE}"
+  fi
+}
+
+deploy_hydra_postgres() {
+  if [[ ! -f "${HYDRA_POSTGRES_DEPLOYMENT}" ]]; then
+    log "Skipping Hydra PostgreSQL; manifest ${HYDRA_POSTGRES_DEPLOYMENT} not found"
+    return 1
+  fi
+
+  ensure_hydra_namespace
+
+  log "Deploying Hydra PostgreSQL (${HYDRA_POSTGRES_DEPLOYMENT})"
+  kubectl apply -f "${HYDRA_POSTGRES_DEPLOYMENT}"
+
+  if [[ -f "${HYDRA_POSTGRES_SERVICE}" ]]; then
+    log "Applying Hydra PostgreSQL service (${HYDRA_POSTGRES_SERVICE})"
+    kubectl apply -f "${HYDRA_POSTGRES_SERVICE}"
+  fi
+
+  wait_for_deployment "${HYDRA_NAMESPACE}" "hydra-postgres" 180
+  kubectl rollout status -n "${HYDRA_NAMESPACE}" deployment/hydra-postgres --timeout=180s >/dev/null
+  log "Hydra PostgreSQL is ready"
+}
+
+run_hydra_migrations() {
+  if [[ ! -f "${HYDRA_MIGRATION_JOB}" ]]; then
+    log "Skipping Hydra migrations; manifest ${HYDRA_MIGRATION_JOB} not found"
+    return 0
+  fi
+
+  # Delete previous job if exists (jobs are immutable)
+  kubectl delete job hydra-migrate -n "${HYDRA_NAMESPACE}" --ignore-not-found=true >/dev/null 2>&1
+
+  log "Running Hydra database migrations (${HYDRA_MIGRATION_JOB})"
+  kubectl apply -f "${HYDRA_MIGRATION_JOB}"
+  wait_for_job_completion "${HYDRA_NAMESPACE}" "hydra-migrate" 180
+}
+
+deploy_hydra() {
+  if [[ ! -f "${HYDRA_DEPLOYMENT}" ]]; then
+    log "Skipping Hydra deployment; manifest ${HYDRA_DEPLOYMENT} not found"
+    return 1
+  fi
+
+  log "Deploying Ory Hydra (${HYDRA_DEPLOYMENT})"
+  kubectl apply -f "${HYDRA_DEPLOYMENT}"
+
+  if [[ -f "${HYDRA_SERVICE}" ]]; then
+    log "Applying Hydra services (${HYDRA_SERVICE})"
+    kubectl apply -f "${HYDRA_SERVICE}"
+  fi
+
+  wait_for_deployment "${HYDRA_NAMESPACE}" "hydra" 180
+  kubectl rollout status -n "${HYDRA_NAMESPACE}" deployment/hydra --timeout=180s >/dev/null
+  log "Ory Hydra is ready"
+
+  # Print access info
+  local node_ip
+  node_ip="$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
+  if [[ -n "${node_ip}" ]]; then
+    log "Hydra public API available at http://${node_ip}:30444/"
+    log "OIDC discovery: http://${node_ip}:30444/.well-known/openid-configuration"
+  fi
+}
+
+sync_hydra_clients() {
+  if [[ ! -f "${HYDRA_CLIENT_SYNC_JOB}" ]]; then
+    log "Skipping Hydra client sync; manifest ${HYDRA_CLIENT_SYNC_JOB} not found"
+    return 0
+  fi
+
+  # Delete previous job if exists
+  kubectl delete job hydra-client-sync -n "${HYDRA_NAMESPACE}" --ignore-not-found=true >/dev/null 2>&1
+
+  log "Syncing OAuth2 clients to Hydra (${HYDRA_CLIENT_SYNC_JOB})"
+  kubectl apply -f "${HYDRA_CLIENT_SYNC_JOB}"
+  wait_for_job_completion "${HYDRA_NAMESPACE}" "hydra-client-sync" 120
+  log "OAuth2 clients synced (go-rest, demo-client)"
+}
+
+apply_hydra_route() {
+  if [[ ! -f "${HYDRA_ROUTE}" ]]; then
+    log "Skipping Hydra HTTPRoute; manifest ${HYDRA_ROUTE} not found"
+    return 0
+  fi
+
+  log "Applying Hydra HTTPRoute (${HYDRA_ROUTE})"
+  kubectl apply -f "${HYDRA_ROUTE}"
+  wait_for_http_route_accepted "hydra-route" "${HYDRA_NAMESPACE}" 120
+}
+
 run_connectivity_probe() {
   log "Probing httpbin route through APISIX (expect 200)"
   local output status
@@ -471,30 +594,17 @@ EOF
   log "Applying httpbin HTTPRoute from ${HTTPBIN_ROUTE_FILE}"
   kubectl apply -f "${HTTPBIN_ROUTE_FILE}"
 
-  if [[ -f "${KEYCLOAK_CONFIGMAP}" ]]; then
-    log "Applying Keycloak realm config (${KEYCLOAK_CONFIGMAP})"
-    kubectl apply -f "${KEYCLOAK_CONFIGMAP}"
-  fi
-  if [[ -f "${KEYCLOAK_DEPLOYMENT}" ]]; then
-    log "Applying Keycloak deployment (${KEYCLOAK_DEPLOYMENT})"
-    kubectl apply -f "${KEYCLOAK_DEPLOYMENT}"
-    wait_for_deployment default keycloak 180
-    kubectl rollout status -n default deployment/keycloak --timeout=180s >/dev/null
-  fi
-  if [[ -f "${KEYCLOAK_SERVICE}" ]]; then
-    log "Applying Keycloak service (${KEYCLOAK_SERVICE})"
-    kubectl apply -f "${KEYCLOAK_SERVICE}"
-    local keycloak_node_ip
-    keycloak_node_ip="$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
-    if [[ -n "${keycloak_node_ip}" ]]; then
-      log "Keycloak admin console available at http://${keycloak_node_ip}:30080/ (admin/admin)"
-    fi
-  fi
+  # Deploy Ory Hydra (replaces Keycloak)
+  deploy_hydra_postgres
+  run_hydra_migrations
+  deploy_hydra
+  sync_hydra_clients
+  apply_hydra_route
 
   if [[ -f "${OIDC_PLUGIN_CONFIG}" ]]; then
     log "Applying APISIX OIDC plugin config (${OIDC_PLUGIN_CONFIG})"
     kubectl apply -f "${OIDC_PLUGIN_CONFIG}"
-    log "OIDC client 'go-rest' (secret: go-rest-secret) is ready in Keycloak realm 'demo' (user: demo/demo)."
+    log "OAuth2 client 'go-rest' (secret: go-rest-secret) is configured in Hydra."
   fi
   if [[ -f "${KEYAUTH_PLUGIN_CONFIG}" ]]; then
     log "Applying APISIX key-auth plugin config (${KEYAUTH_PLUGIN_CONFIG})"
@@ -554,7 +664,7 @@ EOF
       log "Go-rest API probe succeeded (200)"
       ;;
     302)
-      log "Go-rest API probe returned 302 (unauthenticated clients are redirected to Keycloak)"
+      log "Go-rest API probe returned 302 (unauthenticated clients are redirected to auth)"
       ;;
     401)
       log "Go-rest API probe returned 401 (expected for unauthenticated requests)"

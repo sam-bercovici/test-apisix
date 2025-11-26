@@ -1,0 +1,61 @@
+# Ory Hydra client sync job
+# Creates OAuth2 clients from source of truth
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hydra-client-sync
+  namespace: hydra
+  labels:
+    app: hydra-client-sync
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: hydra-client-sync
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait for Hydra admin API to be ready
+        - name: wait-for-hydra
+          image: curlimages/curl:8.5.0
+          command:
+            - sh
+            - -c
+            - |
+              until curl -sf http://hydra-admin.hydra.svc.cluster.local:4445/health/ready; do
+                echo "Waiting for Hydra admin API..."
+                sleep 3
+              done
+              echo "Hydra admin API is ready"
+      containers:
+        - name: client-sync
+          image: curlimages/curl:8.5.0
+          command:
+            - sh
+            - -c
+            - |
+              set -ex
+              ADMIN_URL="http://hydra-admin.hydra.svc.cluster.local:4445"
+
+              echo "Creating client go-rest..."
+              curl -sf -X POST "${ADMIN_URL}/admin/clients" \
+                -H "Content-Type: application/json" \
+                -d '{"client_id":"go-rest","client_secret":"go-rest-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write"}' || \
+              curl -sf -X PUT "${ADMIN_URL}/admin/clients/go-rest" \
+                -H "Content-Type: application/json" \
+                -d '{"client_id":"go-rest","client_secret":"go-rest-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write"}'
+
+              echo ""
+              echo "Creating client demo-client..."
+              curl -sf -X POST "${ADMIN_URL}/admin/clients" \
+                -H "Content-Type: application/json" \
+                -d '{"client_id":"demo-client","client_secret":"demo-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read"}' || \
+              curl -sf -X PUT "${ADMIN_URL}/admin/clients/demo-client" \
+                -H "Content-Type: application/json" \
+                -d '{"client_id":"demo-client","client_secret":"demo-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read"}'
+
+              echo ""
+              echo "Client sync completed successfully"
+              curl -sf "${ADMIN_URL}/admin/clients" | head -c 500

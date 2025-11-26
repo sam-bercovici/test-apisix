@@ -1,0 +1,42 @@
+# Ory Hydra database migration job
+# Run this before deploying Hydra for the first time
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hydra-migrate
+  namespace: hydra
+  labels:
+    app: hydra-migrate
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: hydra-migrate
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait for PostgreSQL to be ready
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z hydra-postgres.hydra.svc.cluster.local 5432; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+              echo "PostgreSQL is ready"
+      containers:
+        - name: hydra-migrate
+          image: oryd/hydra:v2.2.0
+          args:
+            - migrate
+            - sql
+            - -e
+            - --yes
+          env:
+            - name: DSN
+              value: postgres://hydra:hydra@hydra-postgres.hydra.svc.cluster.local:5432/hydra?sslmode=disable
