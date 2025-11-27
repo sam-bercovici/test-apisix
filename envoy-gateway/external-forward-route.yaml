@@ -4,16 +4,17 @@ metadata:
   name: forward-to-internal
   namespace: envoy-gateway-system
   annotations:
-    description: "Forwards ALL traffic from external gateway to internal gateway (Tier 1 → Tier 2)"
+    description: "Forwards ALL traffic from external listener to internal listener (Tier 1 → Tier 2)"
 spec:
   parentRefs:
   - name: eg-gateway
     namespace: envoy-gateway-system
+    sectionName: external  # Attach to external listener only
   rules:
   - matches:
     - path:
         type: PathPrefix
         value: /
     backendRefs:
-    - name: eg-internal-backend
+    - name: eg-gateway-internal  # Service pointing to same pods, port 8080
       port: 8080

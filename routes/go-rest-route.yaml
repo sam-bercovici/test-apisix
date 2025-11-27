@@ -7,8 +7,9 @@ metadata:
     description: "Route for go-rest-api service with JWT authentication"
 spec:
   parentRefs:
-  - name: eg-internal
+  - name: eg-gateway
     namespace: envoy-gateway-system
+    sectionName: internal  # Attach to internal listener
   hostnames:
   - "apitest.local"
   rules:

@@ -19,6 +19,8 @@ spec:
   provider:
     type: Kubernetes
     kubernetes:
+      envoyService:
+        type: ClusterIP  # No cloud load balancer - use port-forward or ingress
       envoyDeployment:
         replicas: 2
         container:

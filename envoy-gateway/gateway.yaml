@@ -4,12 +4,18 @@ metadata:
   name: eg-gateway
   namespace: envoy-gateway-system
   annotations:
-    description: "External gateway for Envoy Gateway - HTTP only (TLS terminated externally)"
+    description: "Single gateway with external and internal listeners for two-tier architecture"
 spec:
   gatewayClassName: envoy-gateway
   listeners:
-  - name: http
+  - name: external
     port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+  - name: internal
+    port: 8080  # Will be patched to 127.0.0.9 (Phase 1) or internal_listener (Phase 2)
     protocol: HTTP
     allowedRoutes:
       namespaces:

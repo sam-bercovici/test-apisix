@@ -12,14 +12,17 @@ ENVOY_GATEWAY_VERSION="${ENVOY_GATEWAY_VERSION:-v1.6.0}"
 ENVOY_GATEWAY_VALUES="${ENVOY_GATEWAY_VALUES:-envoy-gateway/helm-values.yaml}"
 GATEWAY_CLASS_MANIFEST="${GATEWAY_CLASS_MANIFEST:-envoy-gateway/gateway-class.yaml}"
 GATEWAY_MANIFEST="${GATEWAY_MANIFEST:-envoy-gateway/gateway.yaml}"
-INTERNAL_GATEWAY_MANIFEST="${INTERNAL_GATEWAY_MANIFEST:-envoy-gateway/internal-gateway.yaml}"
+# DEPRECATED: Internal gateway merged into main gateway as second listener
+# INTERNAL_GATEWAY_MANIFEST="${INTERNAL_GATEWAY_MANIFEST:-envoy-gateway/internal-gateway.yaml}"
+# Service for routing between listeners (still needed)
 INTERNAL_BACKEND_MANIFEST="${INTERNAL_BACKEND_MANIFEST:-envoy-gateway/uds-backend.yaml}"
 EXTERNAL_FORWARD_ROUTE="${EXTERNAL_FORWARD_ROUTE:-envoy-gateway/external-forward-route.yaml}"
 SECURITY_POLICY_MANIFEST="${SECURITY_POLICY_MANIFEST:-envoy-gateway/security-policy.yaml}"
 TIER1_RATE_LIMIT_POLICY="${TIER1_RATE_LIMIT_POLICY:-envoy-gateway/tier1-rate-limit-policy.yaml}"
 TIER2_QUOTA_POLICY="${TIER2_QUOTA_POLICY:-envoy-gateway/tier2-quota-policy.yaml}"
 GATEWAY_NAME="${GATEWAY_NAME:-eg-gateway}"
-INTERNAL_GATEWAY_NAME="${INTERNAL_GATEWAY_NAME:-eg-internal}"
+# DEPRECATED: Now using single gateway with two listeners (external, internal)
+# INTERNAL_GATEWAY_NAME="${INTERNAL_GATEWAY_NAME:-eg-internal}"
 
 # Redis configuration
 REDIS_NAMESPACE="${REDIS_NAMESPACE:-redis-system}"
@@ -221,23 +224,24 @@ apply_gateway_resources() {
     wait_for_gateway_programmed 120
   fi
 
-  if [[ -f "${INTERNAL_GATEWAY_MANIFEST}" ]]; then
-    log "Applying Internal Gateway (${INTERNAL_GATEWAY_MANIFEST})"
-    kubectl apply -f "${INTERNAL_GATEWAY_MANIFEST}"
-    wait_for_internal_gateway_programmed 120
-  fi
+  # DEPRECATED: Internal gateway merged into main gateway as second listener
+  # if [[ -f "${INTERNAL_GATEWAY_MANIFEST}" ]]; then
+  #   log "Applying Internal Gateway (${INTERNAL_GATEWAY_MANIFEST})"
+  #   kubectl apply -f "${INTERNAL_GATEWAY_MANIFEST}"
+  #   wait_for_internal_gateway_programmed 120
+  # fi
 }
 
 apply_two_tier_routing() {
-  # Apply internal backend service that routes to internal gateway pods
+  # Service for routing from external to internal listener (same pods, different port)
   if [[ -f "${INTERNAL_BACKEND_MANIFEST}" ]]; then
-    log "Applying internal backend service (${INTERNAL_BACKEND_MANIFEST})"
+    log "Applying internal listener backend service (${INTERNAL_BACKEND_MANIFEST})"
     kubectl apply -f "${INTERNAL_BACKEND_MANIFEST}"
   fi
 
-  # Apply forward route: external gateway → internal gateway
+  # Apply forward route: external listener → internal listener (same gateway)
   if [[ -f "${EXTERNAL_FORWARD_ROUTE}" ]]; then
-    log "Applying external forward route to internal gateway (${EXTERNAL_FORWARD_ROUTE})"
+    log "Applying forward route from external to internal listener (${EXTERNAL_FORWARD_ROUTE})"
     kubectl apply -f "${EXTERNAL_FORWARD_ROUTE}"
   fi
 }
@@ -370,23 +374,23 @@ deploy_workloads() {
 }
 
 apply_routes() {
-  # Routes now attach to internal gateway (eg-internal)
+  # Routes now attach to single gateway's internal listener (sectionName: internal)
   if [[ -f "${HTTPBIN_ROUTE_FILE}" ]]; then
     log "Applying httpbin HTTPRoute (${HTTPBIN_ROUTE_FILE})"
     kubectl apply -f "${HTTPBIN_ROUTE_FILE}"
-    wait_for_http_route_accepted "httpbin-route" "${HTTPBIN_NAMESPACE}" "${INTERNAL_GATEWAY_NAME}" 120
+    wait_for_http_route_accepted "httpbin-route" "${HTTPBIN_NAMESPACE}" "${GATEWAY_NAME}" 120
   fi
 
   if [[ -f "${GO_REST_ROUTE_FILE}" ]]; then
     log "Applying go-rest HTTPRoute (${GO_REST_ROUTE_FILE})"
     kubectl apply -f "${GO_REST_ROUTE_FILE}"
-    wait_for_http_route_accepted "go-rest-route" "default" "${INTERNAL_GATEWAY_NAME}" 120
+    wait_for_http_route_accepted "go-rest-route" "default" "${GATEWAY_NAME}" 120
   fi
 
   if [[ -f "${HYDRA_ROUTE_FILE}" ]]; then
     log "Applying Hydra HTTPRoute (${HYDRA_ROUTE_FILE})"
     kubectl apply -f "${HYDRA_ROUTE_FILE}"
-    wait_for_http_route_accepted "hydra-route" "${HYDRA_NAMESPACE}" "${INTERNAL_GATEWAY_NAME}" 120
+    wait_for_http_route_accepted "hydra-route" "${HYDRA_NAMESPACE}" "${GATEWAY_NAME}" 120
   fi
 }
 

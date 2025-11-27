@@ -7,8 +7,9 @@ metadata:
     description: "Route for Ory Hydra OAuth2/OIDC endpoints with path rewriting"
 spec:
   parentRefs:
-  - name: eg-internal
+  - name: eg-gateway
     namespace: envoy-gateway-system
+    sectionName: internal  # Attach to internal listener
   rules:
   # OIDC Discovery endpoint
   - matches:
