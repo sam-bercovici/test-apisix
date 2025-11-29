@@ -20,6 +20,7 @@ EXTERNAL_FORWARD_ROUTE="${EXTERNAL_FORWARD_ROUTE:-envoy-gateway/external-forward
 SECURITY_POLICY_MANIFEST="${SECURITY_POLICY_MANIFEST:-envoy-gateway/security-policy.yaml}"
 TIER1_RATE_LIMIT_POLICY="${TIER1_RATE_LIMIT_POLICY:-envoy-gateway/tier1-rate-limit-policy.yaml}"
 TIER2_QUOTA_POLICY="${TIER2_QUOTA_POLICY:-envoy-gateway/tier2-quota-policy.yaml}"
+INTERNAL_LISTENER_PATCH="${INTERNAL_LISTENER_PATCH:-envoy-gateway/internal-listener-patch.yaml}"
 GATEWAY_NAME="${GATEWAY_NAME:-eg-gateway}"
 # DEPRECATED: Now using single gateway with two listeners (external, internal)
 # INTERNAL_GATEWAY_NAME="${INTERNAL_GATEWAY_NAME:-eg-internal}"
@@ -150,6 +151,25 @@ wait_for_job_completion() {
   die "Job ${namespace}/${name} did not complete within ${timeout}s"
 }
 
+wait_for_envoypatchpolicy_programmed() {
+  local name=$1
+  local namespace=$2
+  local timeout=${3:-120}
+  local end=$((SECONDS + timeout))
+  while (( SECONDS < end )); do
+    local status
+    # EnvoyPatchPolicy status is in status.ancestors[].conditions, not status.conditions
+    status="$(kubectl get envoypatchpolicy "${name}" -n "${namespace}" \
+      -o jsonpath="{.status.ancestors[0].conditions[?(@.type==\"Programmed\")].status}" 2>/dev/null || true)"
+    if [[ "${status^^}" == *TRUE* ]]; then
+      log "EnvoyPatchPolicy ${namespace}/${name} is Programmed"
+      return 0
+    fi
+    sleep 4
+  done
+  die "Timed out waiting for EnvoyPatchPolicy ${namespace}/${name} to be Programmed"
+}
+
 deploy_redis() {
   if [[ ! -f "${REDIS_MANIFEST}" ]]; then
     die "Redis manifest not found: ${REDIS_MANIFEST}"
@@ -244,6 +264,22 @@ apply_two_tier_routing() {
     log "Applying forward route from external to internal listener (${EXTERNAL_FORWARD_ROUTE})"
     kubectl apply -f "${EXTERNAL_FORWARD_ROUTE}"
   fi
+}
+
+apply_internal_listener_patch() {
+  # EnvoyPatchPolicy to convert internal listener from socket-based to true internal_listener
+  # This enables in-process routing without kernel overhead
+  # Requires: bootstrap_extensions with envoy.bootstrap.internal_listener (configured in EnvoyProxy)
+  if [[ ! -f "${INTERNAL_LISTENER_PATCH}" ]]; then
+    log "Skipping internal listener patch; manifest ${INTERNAL_LISTENER_PATCH} not found"
+    return 0
+  fi
+
+  log "Applying EnvoyPatchPolicy for internal listener (${INTERNAL_LISTENER_PATCH})"
+  kubectl apply -f "${INTERNAL_LISTENER_PATCH}"
+
+  # Wait for the patch to be programmed (xDS config applied to Envoy)
+  wait_for_envoypatchpolicy_programmed "internal-listener-patch" "${ENVOY_GATEWAY_NAMESPACE}" 120
 }
 
 apply_security_policy() {
@@ -476,8 +512,12 @@ main() {
   # Phase 2: Gateway Resources
   apply_gateway_resources
 
-  # Phase 3: Two-Tier Routing (external → internal gateway)
+  # Phase 3: Two-Tier Routing (external → internal listener)
   apply_two_tier_routing
+
+  # Phase 3b: Apply internal listener patch (converts to true internal_listener)
+  # This must be after gateway is programmed and forward route exists
+  apply_internal_listener_patch
 
   # Deploy workloads (httpbin, go-rest-api)
   deploy_workloads

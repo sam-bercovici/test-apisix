@@ -1,13 +1,13 @@
-# EnvoyPatchPolicy to bind internal listener to loopback address
-# Phase 1: Use 127.0.0.9 instead of 0.0.0.0 for security (not externally accessible)
-# Phase 2 (future): Convert to true internal_listener for in-process routing
+# EnvoyPatchPolicy for true internal_listener (Phase 2)
+# Uses in-process routing without kernel overhead
+# Requires envoy.bootstrap.internal_listener extension enabled in EnvoyProxy bootstrap
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyPatchPolicy
 metadata:
   name: internal-listener-patch
   namespace: envoy-gateway-system
   annotations:
-    description: "Patches internal listener to bind to 127.0.0.9 and cluster to route to loopback"
+    description: "Patches internal listener to use internal_listener (in-process, no kernel)"
 spec:
   targetRef:
     group: gateway.networking.k8s.io
@@ -15,28 +15,32 @@ spec:
     name: eg-gateway
   type: JSONPatch
   jsonPatches:
-  # Patch 1: Change listener bind address from 0.0.0.0 to 127.0.0.9
+  # === LISTENER PATCHES ===
+  # Remove socket address and add internal_listener
   - type: "type.googleapis.com/envoy.config.listener.v3.Listener"
     name: "envoy-gateway-system/eg-gateway/internal"
     operation:
-      op: replace
-      path: "/address/socket_address/address"
-      value: "127.0.0.9"
-  # Patch 2: Convert EDS cluster to STATIC with loopback endpoint
-  # Step 2a: Change type from EDS to STATIC
+      op: remove
+      path: "/address"
+  - type: "type.googleapis.com/envoy.config.listener.v3.Listener"
+    name: "envoy-gateway-system/eg-gateway/internal"
+    operation:
+      op: add
+      path: "/internal_listener"
+      value: {}
+  # === CLUSTER PATCHES ===
+  # Convert EDS cluster to STATIC with envoy_internal_address endpoint
   - type: "type.googleapis.com/envoy.config.cluster.v3.Cluster"
     name: "httproute/envoy-gateway-system/forward-to-internal/rule/0"
     operation:
       op: replace
       path: "/type"
       value: "STATIC"
-  # Step 2b: Remove eds_cluster_config (not needed for STATIC)
   - type: "type.googleapis.com/envoy.config.cluster.v3.Cluster"
     name: "httproute/envoy-gateway-system/forward-to-internal/rule/0"
     operation:
       op: remove
       path: "/eds_cluster_config"
-  # Step 2c: Add load_assignment with static 127.0.0.9 endpoint
   - type: "type.googleapis.com/envoy.config.cluster.v3.Cluster"
     name: "httproute/envoy-gateway-system/forward-to-internal/rule/0"
     operation:
@@ -48,6 +52,5 @@ spec:
         - lb_endpoints:
           - endpoint:
               address:
-                socket_address:
-                  address: "127.0.0.9"
-                  port_value: 8080
+                envoy_internal_address:
+                  server_listener_name: "envoy-gateway-system/eg-gateway/internal"

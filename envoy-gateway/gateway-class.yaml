@@ -16,6 +16,20 @@ metadata:
   name: custom-proxy-config
   namespace: envoy-gateway-system
 spec:
+  bootstrap:
+    type: JSONPatch
+    jsonPatches:
+      # First create the empty array
+      - op: add
+        path: /bootstrap_extensions
+        value: []
+      # Then add the internal_listener extension to it
+      - op: add
+        path: /bootstrap_extensions/-
+        value:
+          name: envoy.bootstrap.internal_listener
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.bootstrap.internal_listener.v3.InternalListener
   provider:
     type: Kubernetes
     kubernetes:
