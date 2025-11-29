@@ -151,6 +151,24 @@ wait_for_job_completion() {
   die "Job ${namespace}/${name} did not complete within ${timeout}s"
 }
 
+wait_for_jwks_keys() {
+  local timeout=${1:-60}
+  local end=$((SECONDS + timeout))
+  log "Waiting for Hydra JWKS to have signing keys..."
+  while (( SECONDS < end )); do
+    local key_count
+    key_count=$(kubectl exec -n hydra deploy/hydra -- \
+      wget -qO- http://localhost:4444/.well-known/jwks.json 2>/dev/null | \
+      grep -o '"kid"' | wc -l || echo "0")
+    if [[ "$key_count" -gt 0 ]]; then
+      log "Hydra JWKS has $key_count signing key(s)"
+      return 0
+    fi
+    sleep 2
+  done
+  die "Hydra JWKS has no signing keys after ${timeout}s"
+}
+
 wait_for_envoypatchpolicy_programmed() {
   local name=$1
   local namespace=$2
@@ -504,38 +522,32 @@ main() {
   log "Waiting for control-plane node to be Ready"
   kubectl wait --context "${KUBE_CONTEXT}" --for=condition=Ready node --all --timeout=180s >/dev/null
 
-  # Phase 1: Infrastructure
+  # Phase 1: Backend Infrastructure (must be ready before Envoy)
   deploy_redis
   install_cnpg_operator
-  install_envoy_gateway
-
-  # Phase 2: Gateway Resources
-  apply_gateway_resources
-
-  # Phase 3: Two-Tier Routing (external → internal listener)
-  apply_two_tier_routing
-
-  # Phase 3b: Apply internal listener patch (converts to true internal_listener)
-  # This must be after gateway is programmed and forward route exists
-  apply_internal_listener_patch
-
-  # Deploy workloads (httpbin, go-rest-api)
-  deploy_workloads
-
-  # Deploy Hydra OAuth2 stack (Helm-based with CloudNativePG)
   deploy_hydra_postgres
   deploy_hydra
   sync_hydra_clients
+  wait_for_jwks_keys
+
+  # Phase 2: Envoy Gateway (deployed after backend infra ready)
+  install_envoy_gateway
+
+  # Phase 3: Gateway Resources
+  apply_gateway_resources
   apply_hydra_reference_grant
 
-  # Phase 4: Routes (must exist before policies that target them)
-  apply_routes
+  # Phase 4: Two-Tier Routing (external → internal listener)
+  apply_two_tier_routing
+  apply_internal_listener_patch
 
-  # Phase 5: Security Policy (targets HTTPRoute, so routes must exist first)
+  # Phase 5: Gateway Policies (Hydra JWKS now available)
   apply_security_policy
-
-  # Phase 6: Rate Limiting (two-tier: burst + daily quota)
   apply_rate_limit_policies
+
+  # Phase 6: Workloads & Routes (application concerns, deployed last)
+  deploy_workloads
+  apply_routes
 
   # Validation
   print_external_curl_hint

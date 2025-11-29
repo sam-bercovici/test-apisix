@@ -18,6 +18,7 @@ spec:
       issuer: "http://hydra.local/auth"
       remoteJWKS:
         uri: http://hydra-public.hydra.svc.cluster.local:4444/.well-known/jwks.json
+        cacheDuration: 60s  # Reduced from 300s default to minimize stale cache window
         backendRefs:
         - name: hydra-public
           namespace: hydra
