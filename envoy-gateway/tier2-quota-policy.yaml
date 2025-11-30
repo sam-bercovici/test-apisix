@@ -4,7 +4,7 @@ metadata:
   name: tier2-daily-quota
   namespace: envoy-gateway-system
   annotations:
-    description: "Tier 2 daily quota - 1000 requests per day per org"
+    description: "Tier 2 daily quota - tiered requests per day per org"
 spec:
   targetRefs:
   - group: gateway.networking.k8s.io
@@ -14,12 +14,31 @@ spec:
     type: Global
     global:
       rules:
-      # Daily quota per org (x-org-id header from JWT)
-      # No IP fallback needed - unauthenticated requests are rejected at JWT validation
+      # Premium tier: 10,000/day per org
+      - clientSelectors:
+        - headers:
+          - name: x-tier
+            value: premium
+          - type: Distinct
+            name: x-org-id
+        limit:
+          requests: 10000
+          unit: Day
+      # Basic tier: 1,000/day per org
+      - clientSelectors:
+        - headers:
+          - name: x-tier
+            value: basic
+          - type: Distinct
+            name: x-org-id
+        limit:
+          requests: 1000
+          unit: Day
+      # Default (no tier): 500/day per org
       - clientSelectors:
         - headers:
           - type: Distinct
             name: x-org-id
         limit:
-          requests: 1000
+          requests: 500
           unit: Day

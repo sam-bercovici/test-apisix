@@ -11,7 +11,7 @@ This repository packages Envoy Gateway manifests for routing demo services with 
 ### Directory Structure
 - `envoy-gateway/` - Envoy Gateway configuration (GatewayClass, Gateway, policies)
 - `routes/` - HTTPRoute definitions for each service
-- `workloads/` - Application deployments (httpbin, go-rest-api)
+- `workloads/` - Application deployments (httpbin, go-rest-api, token-hook)
 - `redis/` - Redis deployment for rate limit counters
 - `hydra/` - Ory Hydra OAuth2/OIDC stack (Helm-based with CloudNativePG)
 - `plans/` - Architecture and migration documentation
@@ -22,11 +22,14 @@ This repository packages Envoy Gateway manifests for routing demo services with 
 - `envoy-gateway/gateway-class.yaml` - GatewayClass and EnvoyProxy with UDS volume mount
 - `envoy-gateway/gateway.yaml` - Gateway with HTTP listener (no TLS)
 - `envoy-gateway/security-policy.yaml` - JWT authentication targeting go-rest-route (uses backendRefs for JWKS)
-- `envoy-gateway/tier1-rate-limit-policy.yaml` - Burst rate limiting (10 rps per org)
+- `envoy-gateway/tier1-rate-limit-policy.yaml` - Tiered burst rate limiting (50/10/5 rps by tier per client)
+- `envoy-gateway/tier2-quota-policy.yaml` - Tiered daily quota (10K/1K/500 per day by tier per org)
 - `hydra/helm-values.yaml` - Ory Hydra Helm chart values (v25.4.0)
 - `hydra/postgres-cluster.yaml` - CloudNativePG cluster for PostgreSQL 17
 - `hydra/reference-grant.yaml` - Cross-namespace access for SecurityPolicy JWKS
-- `routes/*.yaml` - HTTPRoute definitions for httpbin, go-rest-api, and Hydra
+- `routes/*.yaml` - HTTPRoute definitions for httpbin, go-rest-api, and Hydra (public and internal)
+- `hydra/client-sync-job.yaml` - OAuth2 client provisioning with org metadata
+- `workloads/token-hook/` - Token hook sidecar (Go) for injecting org_id/tier into JWT claims
 
 ## Build, Test, and Development Commands
 

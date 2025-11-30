@@ -39,8 +39,16 @@ status: Draft
 ### 2.3 Rate Limiting
 
 #### 2.3.1 Rate limiting MUST be implemented using a two-tier architecture to separate burst protection from daily quota enforcement.
-#### 2.3.2 **Tier 1 (Burst Protection)**: 10 requests per second per client (`x-client-id` header) with IP-based fallback for unauthenticated requests. Each client gets its own burst limit.
-#### 2.3.3 **Tier 2 (Daily Quota)**: 1000 requests per day per organization (`x-org-id` header). All clients in the same organization share this quota.
+#### 2.3.2 **Tier 1 (Burst Protection)**: Tiered requests per second per client (`x-client-id` header) based on tier:
+- Premium: 50 rps per client
+- Basic: 10 rps per client
+- Default: 5 rps per client
+- Unauthenticated: 5 rps per IP (fallback)
+
+#### 2.3.3 **Tier 2 (Daily Quota)**: Tiered requests per day per organization (`x-org-id` header). All clients in the same organization share this quota:
+- Premium: 10,000 requests/day per org
+- Basic: 1,000 requests/day per org
+- Default: 500 requests/day per org
 #### 2.3.4 Requests blocked by Tier 1 (burst) MUST NOT count against Tier 2 (daily quota).
 #### 2.3.5 Rate limiting MUST use Redis as the backend for global counter synchronization across Envoy proxy replicas.
 #### 2.3.6 The two-tier architecture MUST be implemented using an EnvoyProxy internal_listener via `EnvoyPatchPolicy`. Using EnvoyProxy internal_listener is done via user space sockets that reduce latency to minimum and does not consume tcp ports.
@@ -88,10 +96,10 @@ flowchart TB
     subgraph EG["Envoy Gateway Pod"]
         subgraph T1["External Listener :80"]
             JWT[JWT Validation]
-            Burst[Tier 1: Burst Limit<br/>10 rps/client]
+            Burst[Tier 1: Burst Limit<br/>50/10/5 rps by tier]
         end
         subgraph T2["internal_listener"]
-            Quota[Tier 2: Daily Quota<br/>1000/day/org]
+            Quota[Tier 2: Daily Quota<br/>10K/1K/500 by tier]
         end
     end
 
@@ -335,11 +343,19 @@ curl -H "Host: apitest.local" \
 
 ## 7. Rate Limiting Flow
 
-The two-tier rate limiting architecture ensures burst protection while enforcing daily quotas. Requests blocked by Tier 1 do not count against Tier 2 quotas. Tier 2 only applies to authenticated requests (identified by `x-org-id` header).
+The two-tier rate limiting architecture ensures burst protection while enforcing daily quotas. Requests blocked by Tier 1 do not count against Tier 2 quotas. Rate limits are tiered based on the `x-tier` header extracted from JWT claims.
+
+**Tiered Rate Limits:**
+
+| Tier | Burst (Tier 1) | Daily Quota (Tier 2) |
+|------|----------------|----------------------|
+| premium | 50 rps/client | 10,000/day/org |
+| basic | 10 rps/client | 1,000/day/org |
+| default | 5 rps/client | 500/day/org |
 
 **Key distinction:**
-- **Tier 1 (Burst)**: Per-client limit using `x-client-id` - each client gets its own 10 rps
-- **Tier 2 (Quota)**: Per-org limit using `x-org-id` - all clients in an org share 1000/day
+- **Tier 1 (Burst)**: Per-client limit using `x-client-id` - each client gets its own burst limit based on tier
+- **Tier 2 (Quota)**: Per-org limit using `x-org-id` - all clients in an org share daily quota based on tier
 
 ```mermaid
 flowchart LR
@@ -348,15 +364,19 @@ flowchart LR
     end
 
     subgraph Tier1["Tier 1: Burst Protection"]
-        T1Check{x-client-id<br/>present?}
-        T1Client[Rate by client-id<br/>10 rps per client]
-        T1IP[Rate by IP<br/>10 rps]
+        T1Check{x-tier<br/>header?}
+        T1Premium[Premium<br/>50 rps/client]
+        T1Basic[Basic<br/>10 rps/client]
+        T1Default[Default<br/>5 rps/client]
         T1Pass{Under<br/>limit?}
         T1Block[429 Too Many<br/>Requests]
     end
 
     subgraph Tier2["Tier 2: Daily Quota"]
-        T2Org[Quota by org-id<br/>1000/day shared]
+        T2Check{x-tier<br/>header?}
+        T2Premium[Premium<br/>10K/day/org]
+        T2Basic[Basic<br/>1K/day/org]
+        T2Default[Default<br/>500/day/org]
         T2Pass{Under<br/>quota?}
         T2Block[429 Too Many<br/>Requests]
     end
@@ -366,14 +386,21 @@ flowchart LR
     end
 
     R --> T1Check
-    T1Check -->|Yes| T1Client
-    T1Check -->|No| T1IP
-    T1Client --> T1Pass
-    T1IP --> T1Pass
-    T1Pass -->|Yes| T2Org
+    T1Check -->|premium| T1Premium
+    T1Check -->|basic| T1Basic
+    T1Check -->|other| T1Default
+    T1Premium --> T1Pass
+    T1Basic --> T1Pass
+    T1Default --> T1Pass
+    T1Pass -->|Yes| T2Check
     T1Pass -->|No| T1Block
 
-    T2Org --> T2Pass
+    T2Check -->|premium| T2Premium
+    T2Check -->|basic| T2Basic
+    T2Check -->|other| T2Default
+    T2Premium --> T2Pass
+    T2Basic --> T2Pass
+    T2Default --> T2Pass
     T2Pass -->|Yes| BE
     T2Pass -->|No| T2Block
 ```
@@ -404,8 +431,8 @@ sequenceDiagram
     alt JWT Invalid
         Gateway-->>Client: 401 Unauthorized
     else JWT Valid
-        Gateway->>Gateway: Extract claims:<br/>client_id → x-org-id<br/>sub → x-subject
-        Gateway->>Backend: Forward request<br/>+ x-org-id header<br/>+ x-subject header
+        Gateway->>Gateway: Extract claims:<br/>ext.org_id → x-org-id<br/>client_id → x-client-id<br/>ext.tier → x-tier
+        Gateway->>Backend: Forward request<br/>+ x-org-id, x-client-id, x-tier headers
         Backend-->>Gateway: 200 OK + response
         Gateway-->>Client: 200 OK + response
     end

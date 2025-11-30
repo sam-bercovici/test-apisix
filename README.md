@@ -7,10 +7,11 @@ and routing paths. TLS is assumed to be terminated externally.
 ## Features
 
 - **Envoy Gateway** with Gateway API resources (GatewayClass, Gateway, HTTPRoute)
-- **JWT Authentication** via Ory Hydra (OAuth2/OIDC provider)
-- **Two-Tier Rate Limiting**:
-  - Tier 1: Burst protection (10 rps per org)
-  - Tier 2: Daily quota (1000 req/day per org) via internal UDS listener
+- **JWT Authentication** via Ory Hydra (OAuth2/OIDC provider) with token-hook sidecar
+- **Organization Binding** - Multiple clients can share rate limit quotas via org_id
+- **Tiered Rate Limiting** based on client tier (premium/basic/default):
+  - Tier 1: Burst protection (50/10/5 rps per client by tier)
+  - Tier 2: Daily quota (10K/1K/500 per day per org by tier) via internal UDS listener
 - **Redis** backend for global rate limit counters
 
 ## Repository Layout
@@ -28,19 +29,19 @@ and routing paths. TLS is assumed to be terminated externally.
 ├── routes/                  # HTTPRoute definitions
 │   ├── go-rest-route.yaml   # API route (JWT required)
 │   ├── httpbin-route.yaml   # Httpbin route (no auth)
-│   └── hydra-route.yaml     # Hydra OAuth2 endpoints
+│   ├── hydra-route.yaml     # Hydra internal endpoints (JWKS, introspect)
+│   └── hydra-public-route.yaml  # Hydra public endpoints (token, revoke)
 ├── workloads/               # Application deployments
 │   ├── go-rest-api.yaml     # Go REST API deployment + service
-│   └── httpbin.yaml         # Httpbin deployment + service
+│   ├── httpbin.yaml         # Httpbin deployment + service
+│   └── token-hook/          # Token hook sidecar (Go, Dockerfile)
 ├── redis/                   # Redis for rate limiting
 │   └── deployment.yaml      # Redis deployment + service
-├── hydra/                   # Ory Hydra OAuth2 stack
-│   ├── postgres-deployment.yaml
-│   ├── postgres-service.yaml
-│   ├── hydra-deployment.yaml
-│   ├── hydra-service.yaml
-│   ├── migration-job.yaml
-│   └── client-sync-job.yaml
+├── hydra/                   # Ory Hydra OAuth2 stack (Helm-based)
+│   ├── helm-values.yaml     # Hydra Helm values with token-hook sidecar
+│   ├── postgres-cluster.yaml # CloudNativePG PostgreSQL cluster
+│   ├── client-sync-job.yaml # OAuth2 client provisioning with org metadata
+│   └── reference-grant.yaml # Cross-namespace JWKS access
 ├── plans/                   # Architecture and migration plans
 ├── requirements/            # Project requirements documents
 ├── redeploy.sh              # Full deployment automation
@@ -85,12 +86,13 @@ curl -H 'Host: apitest.local' \
 ## Architecture
 
 ```
-Client → Gateway (Tier 1: 10 rps burst) → UDS → Internal Listener (Tier 2: 1000/day) → Backend
+Client → Gateway (Tier 1: 50/10/5 rps by tier) → UDS → Internal Listener (Tier 2: 10K/1K/500 per day) → Backend
 ```
 
-- **Tier 1**: External listener handles JWT validation and burst rate limiting
-- **Tier 2**: Internal UDS listener enforces daily quota
+- **Tier 1**: External listener handles JWT validation and tiered burst rate limiting per client
+- **Tier 2**: Internal UDS listener enforces tiered daily quota per organization
 - Requests blocked by Tier 1 do NOT count against Tier 2 quota
+- Multiple clients can share quotas via `org_id` (organization binding)
 
 ## Prerequisites
 
@@ -101,6 +103,14 @@ Client → Gateway (Tier 1: 10 rps burst) → UDS → Internal Listener (Tier 2:
 
 ## OAuth2 Clients
 
-Pre-configured Hydra clients:
-- `go-rest` / `go-rest-secret` - For API access (scopes: read, write)
-- `demo-client` / `demo-secret` - For testing (scopes: openid, profile)
+Pre-configured Hydra clients with organization binding:
+
+| Client | Secret | Org ID | Tier | Scopes |
+|--------|--------|--------|------|--------|
+| `acme-service-1` | `acme-service-1-secret` | `org-acme` | premium | read, write |
+| `acme-service-2` | `acme-service-2-secret` | `org-acme` | premium | read |
+| `demo-client` | `demo-secret` | `org-demo` | basic | read |
+| `go-rest` | `go-rest-secret` | (none) | default | read, write |
+
+**Organization Binding**: Clients with the same `org_id` share daily quota limits. For example,
+`acme-service-1` and `acme-service-2` share the 10K/day quota for `org-acme`.

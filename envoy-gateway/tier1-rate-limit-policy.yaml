@@ -4,7 +4,7 @@ metadata:
   name: tier1-burst-limit
   namespace: envoy-gateway-system
   annotations:
-    description: "Tier 1 burst rate limiting - 10 rps per client with IP fallback"
+    description: "Tier 1 burst rate limiting - tiered rps per client with IP fallback"
 spec:
   targetRefs:
   - group: gateway.networking.k8s.io
@@ -14,19 +14,39 @@ spec:
     type: Global
     global:
       rules:
-      # Authenticated: 10 rps per client (client_id extracted from JWT)
+      # Premium tier: 50 rps per client
       - clientSelectors:
         - headers:
+          - name: x-tier
+            value: premium
+          - type: Distinct
+            name: x-client-id
+        limit:
+          requests: 50
+          unit: Second
+      # Basic tier: 10 rps per client
+      - clientSelectors:
+        - headers:
+          - name: x-tier
+            value: basic
           - type: Distinct
             name: x-client-id
         limit:
           requests: 10
           unit: Second
-      # Unauthenticated fallback: 10 rps per IP
+      # Default (no tier or unknown): 5 rps per client
+      - clientSelectors:
+        - headers:
+          - type: Distinct
+            name: x-client-id
+        limit:
+          requests: 5
+          unit: Second
+      # Unauthenticated fallback: 5 rps per IP
       - clientSelectors:
         - sourceCIDR:
             type: Distinct
             value: "0.0.0.0/0"
         limit:
-          requests: 10
+          requests: 5
           unit: Second
