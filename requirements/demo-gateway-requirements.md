@@ -56,7 +56,7 @@ status: Draft
 ### 2.4 Supporting Services
 
 #### 2.4.1 Ory Hydra MUST be deployed via official Helm chart (v0.52.0) as the OAuth2/OIDC provider.
-#### 2.4.2 Hydra MUST use PostgreSQL 17 managed by CloudNativePG operator for persistence.
+#### 2.4.2 Hydra MUST use PostgreSQL 17 managed by CloudNativePG operator for persistence. Alternative supported SQL databases include MySQL and CockroachDB. SQLite is supported for development/testing only.
 #### 2.4.3 Hydra MUST be configured with OAuth2 clients (`go-rest`, `demo-client`) for machine-to-machine authentication via a client sync Job.
 #### 2.4.4 The `httpbin` demo service MUST be deployed with a `Deployment` and `Service` managed by `redeploy.sh`.
 #### 2.4.5 Redis MUST be deployed in `redis-system` namespace for rate limit counter storage.
@@ -437,3 +437,270 @@ sequenceDiagram
         Gateway-->>Client: 200 OK + response
     end
 ```
+
+## 9. Production Considerations
+
+This section documents security and operational considerations for deploying the gateway stack in production environments.
+
+### 9.1 JWT Signing Key Management
+
+#### 9.1.1 Current Implementation (Development)
+
+In this demo setup, Ory Hydra stores JWT signing keys in the **PostgreSQL database** with encryption at rest:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Current Key Storage                         │
+├─────────────────────────────────────────────────────────────────┤
+│  Hydra Pod                                                      │
+│    │                                                            │
+│    ├─► Auto-generates RSA key pair on first startup             │
+│    │                                                            │
+│    ▼                                                            │
+│  PostgreSQL (CloudNativePG)                                     │
+│    │                                                            │
+│    ├─► Private key encrypted with system secret                 │
+│    │   (hydra.config.secrets.system in helm-values.yaml)        │
+│    │                                                            │
+│    └─► Stored in hydra_jwk table                                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Configuration** (`hydra/helm-values.yaml`):
+```yaml
+hydra:
+  config:
+    secrets:
+      system:
+        - "this-is-a-32-char-secret-for-dev"  # Encrypts private keys at rest
+    strategies:
+      access_token: jwt  # Use JWT (not opaque) access tokens
+```
+
+**Limitations of current approach:**
+- System secret is stored in plain text in Helm values (acceptable for demo only)
+- Private key material exists in database, even if encrypted
+- Key rotation requires database operations
+- No hardware-backed key protection
+
+#### 9.1.2 Production Recommendation: Hardware Security Module (HSM)
+
+For production deployments, private keys SHOULD be stored in a Hardware Security Module (HSM). Ory Hydra supports HSM integration via the **PKCS#11 standard**.
+
+##### Supported HSM Options
+
+| Platform | Option | PKCS#11 Support | Notes |
+|----------|--------|-----------------|-------|
+| **AWS** | CloudHSM | ✅ Native | Officially documented. Uses `/opt/cloudhsm/lib/libcloudhsm_pkcs11.so`. Single slot exposed, load-balanced across HSM instances. |
+| **AWS** | KMS | ❌ Not supported | No PKCS#11 interface. Would require custom wrapper. |
+| **Azure** | Dedicated HSM | ✅ Should work | Uses Thales Luna HSMs which provide PKCS#11 libraries. |
+| **Azure** | Key Vault | ❌ Not supported | REST API only, no PKCS#11 interface. |
+| **Azure** | Managed HSM | ❌ Not supported | REST API only, no PKCS#11 interface. |
+| **Self-managed** | Thales Luna | ✅ Native | Industry standard, provides PKCS#11 library. |
+| **Self-managed** | Entrust nShield | ✅ Native | Provides PKCS#11 library. |
+| **Self-managed** | Utimaco | ✅ Native | Provides PKCS#11 library. |
+| **Self-managed** | YubiHSM 2 | ✅ Native | Budget-friendly (~$650), uses yubihsm-pkcs11 library. |
+| **Testing** | SoftHSM | ✅ Native | Software emulation for development/testing. |
+
+##### HSM Configuration
+
+Enable HSM support via environment variables:
+
+```yaml
+# Example Helm values for HSM-enabled Hydra
+hydra:
+  config:
+    # ... other config
+  extraEnv:
+    - name: HSM_ENABLED
+      value: "true"
+    - name: HSM_LIBRARY
+      value: "/opt/cloudhsm/lib/libcloudhsm_pkcs11.so"  # Vendor-specific
+    - name: HSM_TOKEN_LABEL
+      value: "hydra"
+    - name: HSM_PIN
+      valueFrom:
+        secretKeyRef:
+          name: hsm-credentials
+          key: pin
+    - name: HSM_KEY_SET_PREFIX
+      value: "prod."  # Optional: prefix for multi-instance deployments
+```
+
+##### HSM Key Behavior
+
+- **Auto-generation**: If keys with labels `hydra.openid.id-token` and `hydra.jwt.access-token` don't exist in the HSM, Hydra generates them on startup
+- **Pre-provisioning**: Keys can be pre-created in the HSM with the expected labels
+- **Multi-instance**: Use `HSM_KEY_SET_PREFIX` when multiple Hydra instances share an HSM partition
+- **Fallback**: If HSM keys aren't found, Hydra falls back to software keys (not recommended for production)
+
+##### Algorithm Support
+
+HSM integration supports:
+- RSA 4096-bit keys
+- ECDSA with curves secp256r1 (P-256) or secp521r1 (P-521)
+- **EdDSA/Ed25519 is NOT supported** (PKCS#11 v2.4 limitation)
+
+#### 9.1.3 Middle Ground: Externally Managed System Secret
+
+A practical alternative to full HSM integration is to keep encrypted keys in PostgreSQL while bootstrapping the system secret from an external secret store. This avoids the complexity and cost of HSM while removing secrets from version control.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Architecture: External System Secret                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  AWS Secrets Manager ──► Init Container ──► File Mount (tmpfs)  │
+│  Azure Key Vault              │                                 │
+│  HashiCorp Vault              ▼                                 │
+│                          Hydra Pod                              │
+│                              │                                  │
+│                              ▼                                  │
+│                          PostgreSQL (encrypted private keys)    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Advantages over HSM:**
+- No additional infrastructure (CloudHSM, Dedicated HSM)
+- Lower cost - uses existing secret management services
+- Simpler operations - no PKCS#11 configuration
+- Secret never stored in Git or K8s Secrets (etcd)
+
+**Trade-offs vs HSM:**
+- Private key material exists in database (encrypted)
+- No hardware-backed key protection
+- System secret compromise would expose private keys
+
+##### Why Avoid Kubernetes Secrets
+
+Kubernetes Secrets have security limitations:
+- Base64 encoded only (not encrypted by default)
+- Stored in etcd (accessible if etcd is compromised)
+- Visible via `kubectl get secret -o yaml` to anyone with RBAC access
+- Many external secret tools (External Secrets Operator) sync to K8s Secrets as an intermediate step
+
+For sensitive secrets like Hydra's system secret, prefer methods that bypass K8s Secrets entirely.
+
+##### Option A: Init Container (Recommended)
+
+The simplest approach - fetch secrets directly from the external store at pod startup:
+
+```yaml
+# hydra/helm-values.yaml
+deployment:
+  initContainers:
+    - name: fetch-secrets
+      image: amazon/aws-cli  # or mcr.microsoft.com/azure-cli, hashicorp/vault
+      command:
+        - sh
+        - -c
+        - |
+          aws secretsmanager get-secret-value \
+            --secret-id hydra/system-secret \
+            --query SecretString --output text > /secrets/system
+      volumeMounts:
+        - name: secrets
+          mountPath: /secrets
+      # Use IRSA (AWS) or Workload Identity (Azure/GCP) for auth
+
+  extraVolumes:
+    - name: secrets
+      emptyDir:
+        medium: Memory  # tmpfs - secret never touches disk
+
+  extraVolumeMounts:
+    - name: secrets
+      mountPath: /secrets
+      readOnly: true
+
+hydra:
+  config:
+    secrets:
+      system:
+        - file:///secrets/system
+```
+
+**Pros:** No cluster-wide dependencies, simple to debug, portable
+**Cons:** No auto-rotation (pod restart required)
+
+##### Option B: Secrets Store CSI Driver (File-Only Mode)
+
+Mount secrets directly as files without creating K8s Secrets:
+
+```yaml
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: hydra-secrets
+  namespace: hydra
+spec:
+  provider: azure  # or aws, vault
+  parameters:
+    keyvaultName: "my-keyvault"
+    objects: |
+      array:
+        - objectName: "hydra-system-secret"
+          objectType: "secret"
+  # Note: NO secretObjects section = no K8s Secret created
+```
+
+**Pros:** Supports auto-rotation, native cloud integration
+**Cons:** Requires CSI driver installed cluster-wide
+
+##### Comparison
+
+| Method | K8s Secret Created | Secret in etcd | Dependencies | Auto-Rotation |
+|--------|-------------------|----------------|--------------|---------------|
+| External Secrets Operator | ✅ Yes | ✅ Yes | ESO | ✅ Yes |
+| CSI Driver (with secretObjects) | ✅ Yes | ✅ Yes | CSI Driver | ✅ Yes |
+| **CSI Driver (file only)** | ❌ No | ❌ No | CSI Driver | ✅ Yes |
+| **Init Container** | ❌ No | ❌ No | None | ❌ No |
+
+**Recommendation:** Use init container for simplicity, or CSI Driver (file-only) if auto-rotation is required.
+
+#### 9.1.4 Production Checklist
+
+| Item | Demo | Middle Ground | Full HSM |
+|------|------|---------------|----------|
+| System secret | Hardcoded in values | External store via init container | External store via init container |
+| Private key storage | PostgreSQL (encrypted) | PostgreSQL (encrypted) | HSM via PKCS#11 |
+| K8s Secrets used | No | No (use file mount) | No (use file mount) |
+| Key rotation | Manual | Manual + pod restart | Automated via HSM |
+| Secret management | Plain text YAML | AWS SM / Azure KV / Vault | AWS SM / Azure KV / Vault |
+| Database encryption | None | TLS + encryption at rest | TLS + encryption at rest |
+| Backup/DR | Not configured | Database backups | HSM key backup procedures |
+
+### 9.2 Additional Production Considerations
+
+#### 9.2.1 TLS Termination
+- Current setup assumes external TLS termination
+- For production: Configure TLS at Gateway level or use a service mesh
+
+#### 9.2.2 Secret Management
+- Replace hardcoded secrets with external secret management (Vault, AWS Secrets Manager, Azure Key Vault)
+- Avoid Kubernetes Secrets for sensitive data - use init container or CSI Driver file-only mode (see section 9.1.3)
+- For Hydra system secret specifically, see section 9.1.3 for detailed implementation options
+
+#### 9.2.3 Database Security and High Availability
+- Enable TLS for PostgreSQL connections (`sslmode=require` or `verify-full`)
+- Use strong, unique credentials managed externally
+- Enable encryption at rest for PostgreSQL volumes
+- Deploy CloudNativePG with multiple instances for high availability:
+
+  | Instances | Failure Tolerance | Use Case |
+  |-----------|-------------------|----------|
+  | 1 | None | Dev/test only |
+  | 2 (1+1) | Survives 1 failure, no redundancy during failover | Basic HA, cost-sensitive |
+  | 3 (1+2) | Survives 1 failure with continued redundancy | Production standard |
+
+  Recommendation: Use 2-3 instances depending on availability requirements and budget.
+
+- Spread instances across availability zones using pod anti-affinity
+- Configure automated backups with point-in-time recovery (PITR)
+- Use connection pooling (PgBouncer) for high connection counts
+
+#### 9.2.4 Rate Limit Redis
+- Deploy Redis in cluster mode for high availability
+- Enable Redis AUTH and TLS
+- Consider Redis Sentinel or Redis Cluster for production workloads
