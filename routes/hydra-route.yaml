@@ -4,14 +4,14 @@ metadata:
   name: hydra-route
   namespace: hydra
   annotations:
-    description: "Route for Ory Hydra OAuth2/OIDC endpoints with path rewriting"
+    description: "Internal-only Hydra endpoints (JWKS, introspection) - not exposed externally"
 spec:
   parentRefs:
   - name: eg-gateway
     namespace: envoy-gateway-system
-    sectionName: internal  # Attach to internal listener
+    sectionName: internal  # Internal access only
   rules:
-  # OIDC Discovery endpoint
+  # OIDC Discovery - internal only (Envoy Gateway fetches JWKS for JWT validation)
   - matches:
     - path:
         type: PathPrefix
@@ -25,17 +25,17 @@ spec:
     backendRefs:
     - name: hydra-public
       port: 4444
-  # OAuth2 Token endpoint
+  # Introspection - internal only (for backend services to validate tokens)
   - matches:
     - path:
-        type: PathPrefix
-        value: /auth/oauth2
+        type: Exact
+        value: /auth/oauth2/introspect
     filters:
     - type: URLRewrite
       urlRewrite:
         path:
-          type: ReplacePrefixMatch
-          replacePrefixMatch: /oauth2
+          type: ReplaceFullPath
+          replaceFullPath: /oauth2/introspect
     backendRefs:
     - name: hydra-public
       port: 4444

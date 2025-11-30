@@ -25,6 +25,8 @@ hydra:
       expose_internal_errors: false
       client_credentials:
         default_grant_allowed_scope: true
+      token_hook:
+        url: http://127.0.0.1:8080/token-hook  # Sidecar container (localhost)
     log:
       level: info
       format: json
@@ -37,6 +39,38 @@ deployment:
     limits:
       cpu: 500m
       memory: 256Mi
+  # Token hook sidecar - injects org metadata into JWT claims
+  extraContainers: |
+    - name: token-hook
+      image: token-hook:latest
+      imagePullPolicy: IfNotPresent
+      ports:
+        - containerPort: 8080
+          name: http
+      env:
+        - name: PORT
+          value: "8080"
+        - name: HYDRA_ADMIN_URL
+          value: "http://localhost:4445"
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 128Mi
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: 2
+        periodSeconds: 5
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: 5
+        periodSeconds: 10
 
 service:
   public:

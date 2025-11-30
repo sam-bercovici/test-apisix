@@ -1,0 +1,41 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: hydra-public-route
+  namespace: hydra
+  annotations:
+    description: "Public OAuth2 endpoints for external M2M clients (token, revoke)"
+spec:
+  parentRefs:
+  - name: eg-gateway
+    namespace: envoy-gateway-system
+    sectionName: external  # Public access via port 80
+  rules:
+  # Token endpoint - public (M2M clients obtain access tokens)
+  - matches:
+    - path:
+        type: Exact
+        value: /auth/oauth2/token
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplaceFullPath
+          replaceFullPath: /oauth2/token
+    backendRefs:
+    - name: hydra-public
+      port: 4444
+  # Revocation endpoint - public (clients revoke their tokens)
+  - matches:
+    - path:
+        type: Exact
+        value: /auth/oauth2/revoke
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplaceFullPath
+          replaceFullPath: /oauth2/revoke
+    backendRefs:
+    - name: hydra-public
+      port: 4444

@@ -39,22 +39,43 @@ spec:
               set -ex
               ADMIN_URL="http://hydra-admin.hydra.svc.cluster.local:4445"
 
-              echo "Creating client go-rest..."
+              # Organization: acme - Primary test organization with two services
+              echo "Creating client acme-service-1 (org: acme)..."
+              curl -sf -X POST "${ADMIN_URL}/admin/clients" \
+                -H "Content-Type: application/json" \
+                -d '{"client_id":"acme-service-1","client_secret":"acme-service-1-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write","metadata":{"org_id":"org-acme","org_name":"Acme Corporation","tier":"premium"}}' || \
+              curl -sf -X PUT "${ADMIN_URL}/admin/clients/acme-service-1" \
+                -H "Content-Type: application/json" \
+                -d '{"client_id":"acme-service-1","client_secret":"acme-service-1-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write","metadata":{"org_id":"org-acme","org_name":"Acme Corporation","tier":"premium"}}'
+
+              echo ""
+              echo "Creating client acme-service-2 (org: acme)..."
+              curl -sf -X POST "${ADMIN_URL}/admin/clients" \
+                -H "Content-Type: application/json" \
+                -d '{"client_id":"acme-service-2","client_secret":"acme-service-2-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read","metadata":{"org_id":"org-acme","org_name":"Acme Corporation","tier":"premium"}}' || \
+              curl -sf -X PUT "${ADMIN_URL}/admin/clients/acme-service-2" \
+                -H "Content-Type: application/json" \
+                -d '{"client_id":"acme-service-2","client_secret":"acme-service-2-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read","metadata":{"org_id":"org-acme","org_name":"Acme Corporation","tier":"premium"}}'
+
+              echo ""
+              # Organization: demo - Secondary demo organization
+              echo "Creating client demo-client (org: demo)..."
+              curl -sf -X POST "${ADMIN_URL}/admin/clients" \
+                -H "Content-Type: application/json" \
+                -d '{"client_id":"demo-client","client_secret":"demo-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read","metadata":{"org_id":"org-demo","org_name":"Demo Organization","tier":"basic"}}' || \
+              curl -sf -X PUT "${ADMIN_URL}/admin/clients/demo-client" \
+                -H "Content-Type: application/json" \
+                -d '{"client_id":"demo-client","client_secret":"demo-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read","metadata":{"org_id":"org-demo","org_name":"Demo Organization","tier":"basic"}}'
+
+              echo ""
+              # Legacy client: go-rest (backward compatibility, uses client_id as org_id)
+              echo "Creating client go-rest (legacy, no org metadata)..."
               curl -sf -X POST "${ADMIN_URL}/admin/clients" \
                 -H "Content-Type: application/json" \
                 -d '{"client_id":"go-rest","client_secret":"go-rest-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write"}' || \
               curl -sf -X PUT "${ADMIN_URL}/admin/clients/go-rest" \
                 -H "Content-Type: application/json" \
                 -d '{"client_id":"go-rest","client_secret":"go-rest-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write"}'
-
-              echo ""
-              echo "Creating client demo-client..."
-              curl -sf -X POST "${ADMIN_URL}/admin/clients" \
-                -H "Content-Type: application/json" \
-                -d '{"client_id":"demo-client","client_secret":"demo-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read"}' || \
-              curl -sf -X PUT "${ADMIN_URL}/admin/clients/demo-client" \
-                -H "Content-Type: application/json" \
-                -d '{"client_id":"demo-client","client_secret":"demo-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read"}'
 
               echo ""
               echo "Client sync completed successfully"

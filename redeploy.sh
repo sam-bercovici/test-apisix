@@ -34,6 +34,7 @@ HTTPBIN_ROUTE_FILE="${HTTPBIN_ROUTE_FILE:-routes/httpbin-route.yaml}"
 HTTPBIN_NAMESPACE="${HTTPBIN_NAMESPACE:-default}"
 GO_REST_ROUTE_FILE="${GO_REST_ROUTE_FILE:-routes/go-rest-route.yaml}"
 HYDRA_ROUTE_FILE="${HYDRA_ROUTE_FILE:-routes/hydra-route.yaml}"
+HYDRA_PUBLIC_ROUTE_FILE="${HYDRA_PUBLIC_ROUTE_FILE:-routes/hydra-public-route.yaml}"
 
 # Workloads
 HTTPBIN_MANIFEST="${HTTPBIN_MANIFEST:-workloads/httpbin.yaml}"
@@ -48,6 +49,10 @@ HYDRA_VALUES="${HYDRA_VALUES:-hydra/helm-values.yaml}"
 HYDRA_POSTGRES_CLUSTER="${HYDRA_POSTGRES_CLUSTER:-hydra/postgres-cluster.yaml}"
 HYDRA_REFERENCE_GRANT="${HYDRA_REFERENCE_GRANT:-hydra/reference-grant.yaml}"
 HYDRA_CLIENT_SYNC_JOB="${HYDRA_CLIENT_SYNC_JOB:-hydra/client-sync-job.yaml}"
+
+# Token Hook configuration (deployed as Hydra sidecar)
+TOKEN_HOOK_DIR="${TOKEN_HOOK_DIR:-workloads/token-hook}"
+TOKEN_HOOK_IMAGE="${TOKEN_HOOK_IMAGE:-token-hook:latest}"
 
 # Test paths
 HTTPBIN_TEST_PATH="${HTTPBIN_TEST_PATH:-/status/200}"
@@ -66,6 +71,33 @@ die() {
 need() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 }
+
+build_token_hook() {
+  if [[ ! -d "${TOKEN_HOOK_DIR}" ]]; then
+    log "Skipping token-hook build; directory ${TOKEN_HOOK_DIR} not found"
+    return 0
+  fi
+
+  if [[ ! -f "${TOKEN_HOOK_DIR}/Dockerfile" ]]; then
+    log "Skipping token-hook build; Dockerfile not found in ${TOKEN_HOOK_DIR}"
+    return 0
+  fi
+
+  log "Building token-hook image (${TOKEN_HOOK_IMAGE})"
+  docker build -t "${TOKEN_HOOK_IMAGE}" "${TOKEN_HOOK_DIR}"
+  log "Token-hook image built successfully"
+}
+
+load_token_hook_to_kind() {
+  if [[ ! -d "${TOKEN_HOOK_DIR}" ]]; then
+    return 0
+  fi
+
+  log "Loading token-hook image into kind cluster ${CLUSTER_NAME}"
+  kind load docker-image "${TOKEN_HOOK_IMAGE}" --name "${CLUSTER_NAME}"
+  log "Token-hook image loaded into kind"
+}
+
 
 wait_for_deployment() {
   local namespace=$1
@@ -442,9 +474,15 @@ apply_routes() {
   fi
 
   if [[ -f "${HYDRA_ROUTE_FILE}" ]]; then
-    log "Applying Hydra HTTPRoute (${HYDRA_ROUTE_FILE})"
+    log "Applying Hydra internal HTTPRoute (${HYDRA_ROUTE_FILE})"
     kubectl apply -f "${HYDRA_ROUTE_FILE}"
     wait_for_http_route_accepted "hydra-route" "${HYDRA_NAMESPACE}" "${GATEWAY_NAME}" 120
+  fi
+
+  if [[ -f "${HYDRA_PUBLIC_ROUTE_FILE}" ]]; then
+    log "Applying Hydra public HTTPRoute (${HYDRA_PUBLIC_ROUTE_FILE})"
+    kubectl apply -f "${HYDRA_PUBLIC_ROUTE_FILE}"
+    wait_for_http_route_accepted "hydra-public-route" "${HYDRA_NAMESPACE}" "${GATEWAY_NAME}" 120
   fi
 }
 
@@ -508,6 +546,10 @@ main() {
   need kind
   need kubectl
   need helm
+  need docker
+
+  # Phase 0: Build token-hook image before cluster operations
+  build_token_hook
 
   if ! kind get clusters 2>/dev/null | grep -Fxq "${CLUSTER_NAME}"; then
     log "Creating kind cluster ${CLUSTER_NAME}"
@@ -522,11 +564,14 @@ main() {
   log "Waiting for control-plane node to be Ready"
   kubectl wait --context "${KUBE_CONTEXT}" --for=condition=Ready node --all --timeout=180s >/dev/null
 
+  # Load token-hook image into kind cluster (needed for Hydra sidecar)
+  load_token_hook_to_kind
+
   # Phase 1: Backend Infrastructure (must be ready before Envoy)
   deploy_redis
   install_cnpg_operator
   deploy_hydra_postgres
-  deploy_hydra
+  deploy_hydra  # Hydra now includes token-hook as sidecar
   sync_hydra_clients
   wait_for_jwks_keys
 
