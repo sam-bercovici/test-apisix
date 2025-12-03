@@ -7,32 +7,38 @@ IMAGE_TAG ?= latest
 PLATFORMS ?= linux/amd64,linux/arm64
 DISTROLESS_VARIANT ?= debug-nonroot
 
+# Go version (used for both container commands and Docker build)
+GO_VERSION ?= 1.25
+
 # Go container for running go commands without local Go installation
-GO_IMAGE ?= golang:1.21-alpine
+GO_IMAGE ?= golang:$(GO_VERSION)-alpine
 
 # Version file
 VERSIONS_FILE := versions.yaml
 
 .PHONY: build build-local build-hardened push clean \
-        compute-versions validate-versions tidy swagger swagger-fmt help
+        compute-versions validate-versions tidy swagger swagger-fmt vuln help
 
 ##@ Build Targets
 
 build: validate-versions ## Multi-arch build and push to registry
 	docker buildx build \
 		--platform $(PLATFORMS) \
+		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg DISTROLESS_VARIANT=$(DISTROLESS_VARIANT) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		--push .
 
-build-local: validate-versions tidy ## Local build for current arch (for kind)
+build-local: validate-versions tidy vuln ## Local build for current arch (for kind)
 	docker build \
+		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg DISTROLESS_VARIANT=$(DISTROLESS_VARIANT) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) .
 
-build-hardened: validate-versions tidy ## Production build without shell
+build-hardened: validate-versions tidy vuln ## Production build without shell
 	docker buildx build \
 		--platform $(PLATFORMS) \
+		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg DISTROLESS_VARIANT=nonroot \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		--push .
@@ -48,6 +54,15 @@ tidy: ## Tidy go modules (runs in container, no local Go required)
 		-w /app \
 		$(GO_IMAGE) \
 		go mod tidy
+
+##@ Security
+
+vuln: ## Run Go vulnerability check (https://go.dev/doc/security/vuln/)
+	docker run --rm \
+		-v "$$(pwd):/app" \
+		-w /app \
+		$(GO_IMAGE) \
+		sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./..."
 
 ##@ Documentation
 

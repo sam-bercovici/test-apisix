@@ -54,7 +54,9 @@ kubectl rollout restart deployment/hydra -n hydra
 | Target | Description |
 |--------|-------------|
 | `make tidy` | Run `go mod tidy` in container |
-| `make build-local` | Build Docker image for Kind |
+| `make vuln` | Run Go vulnerability check ([govulncheck](https://go.dev/doc/security/vuln/)) |
+| `make build-local` | Build Docker image for Kind (runs tidy + vuln first) |
+| `make build-hardened` | Production build without shell (runs tidy + vuln first) |
 | `make swagger` | Generate OpenAPI/Swagger documentation |
 | `make swagger-fmt` | Format swagger comments |
 

@@ -4,8 +4,9 @@
 
 # ARG must be declared before FROM that uses it
 ARG DISTROLESS_VARIANT=debug-nonroot
+ARG GO_VERSION=1.25
 
-FROM --platform=$BUILDPLATFORM golang:1.21-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS builder
 
 # Install git for go mod download (some dependencies need it)
 RUN apk add --no-cache git
