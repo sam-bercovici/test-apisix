@@ -8,7 +8,7 @@ and routing paths. TLS is assumed to be terminated externally.
 
 - **Envoy Gateway** with Gateway API resources (GatewayClass, Gateway, HTTPRoute)
 - **JWT Authentication** via Ory Hydra (OAuth2/OIDC provider) with token-hook sidecar
-- **Organization Binding** - Multiple clients can share rate limit quotas via org_id
+- **Organization Binding** - Multiple clients can share rate limit quotas via enterprise_id
 - **Tiered Rate Limiting** based on client tier (premium/basic/default):
   - Tier 1: Burst protection (50/10/5 rps per client by tier)
   - Tier 2: Daily quota (10K/1K/500 per day per org by tier) via internal UDS listener
@@ -92,7 +92,7 @@ Client → Gateway (Tier 1: 50/10/5 rps by tier) → UDS → Internal Listener (
 - **Tier 1**: External listener handles JWT validation and tiered burst rate limiting per client
 - **Tier 2**: Internal UDS listener enforces tiered daily quota per organization
 - Requests blocked by Tier 1 do NOT count against Tier 2 quota
-- Multiple clients can share quotas via `org_id` (organization binding)
+- Multiple clients can share quotas via `enterprise_id` (organization binding)
 
 ## Prerequisites
 
@@ -112,5 +112,5 @@ Pre-configured Hydra clients with organization binding:
 | `demo-client` | `demo-secret` | `org-demo` | basic | read |
 | `go-rest` | `go-rest-secret` | (none) | default | read, write |
 
-**Organization Binding**: Clients with the same `org_id` share daily quota limits. For example,
+**Organization Binding**: Clients with the same `enterprise_id` share daily quota limits. For example,
 `acme-service-1` and `acme-service-2` share the 10K/day quota for `org-acme`.

@@ -1,0 +1,30 @@
+# RBAC for hydra-client-sync job to create K8s secrets
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hydra-client-sync
+  namespace: hydra
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hydra-client-sync
+  namespace: hydra
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hydra-client-sync
+  namespace: hydra
+subjects:
+  - kind: ServiceAccount
+    name: hydra-client-sync
+    namespace: hydra
+roleRef:
+  kind: Role
+  name: hydra-client-sync
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,8 @@
+# Default versions - run 'make compute-versions HYDRA_IMAGE_TAG=<tag>' to update
+
+hydra:
+  image_tag: "v25.4.0"
+  go_module: "v2.2.0"
+  helm_chart: "0.52.0"
+
+computed_at: "2025-12-03T16:37:23Z"

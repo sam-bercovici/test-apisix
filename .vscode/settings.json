@@ -2,7 +2,16 @@
     "cSpell.words": [
         "APISIX",
         "apitest",
+        "backendtrafficpolicy",
+        "cloudnative",
+        "cnpg",
+        "curlimages",
+        "envoypatchpolicy",
         "envoyproxy",
-        "Jetstack"
+        "gofrs",
+        "httproute",
+        "Jetstack",
+        "securitypolicy",
+        "sqlxx"
     ]
 }

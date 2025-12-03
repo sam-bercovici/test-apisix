@@ -49,10 +49,12 @@ HYDRA_VALUES="${HYDRA_VALUES:-hydra/helm-values.yaml}"
 HYDRA_POSTGRES_CLUSTER="${HYDRA_POSTGRES_CLUSTER:-hydra/postgres-cluster.yaml}"
 HYDRA_REFERENCE_GRANT="${HYDRA_REFERENCE_GRANT:-hydra/reference-grant.yaml}"
 HYDRA_CLIENT_SYNC_JOB="${HYDRA_CLIENT_SYNC_JOB:-hydra/client-sync-job.yaml}"
+HYDRA_CLIENT_SYNC_RBAC="${HYDRA_CLIENT_SYNC_RBAC:-hydra/client-sync-rbac.yaml}"
+HYDRA_SIDECAR_SERVICE="${HYDRA_SIDECAR_SERVICE:-hydra/hydra-sidecar-service.yaml}"
 
-# Token Hook configuration (deployed as Hydra sidecar)
-TOKEN_HOOK_DIR="${TOKEN_HOOK_DIR:-workloads/token-hook}"
-TOKEN_HOOK_IMAGE="${TOKEN_HOOK_IMAGE:-token-hook:latest}"
+# Hydra Sidecar configuration (token-hook + client sync)
+HYDRA_SIDECAR_DIR="${HYDRA_SIDECAR_DIR:-workloads/hydra-sidecar}"
+HYDRA_SIDECAR_IMAGE="${HYDRA_SIDECAR_IMAGE:-hydra-sidecar:latest}"
 
 # Test paths
 HTTPBIN_TEST_PATH="${HTTPBIN_TEST_PATH:-/status/200}"
@@ -72,30 +74,35 @@ need() {
   command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 }
 
-build_token_hook() {
-  if [[ ! -d "${TOKEN_HOOK_DIR}" ]]; then
-    log "Skipping token-hook build; directory ${TOKEN_HOOK_DIR} not found"
+build_hydra_sidecar() {
+  if [[ ! -d "${HYDRA_SIDECAR_DIR}" ]]; then
+    log "Skipping hydra-sidecar build; directory ${HYDRA_SIDECAR_DIR} not found"
     return 0
   fi
 
-  if [[ ! -f "${TOKEN_HOOK_DIR}/Dockerfile" ]]; then
-    log "Skipping token-hook build; Dockerfile not found in ${TOKEN_HOOK_DIR}"
+  if [[ ! -f "${HYDRA_SIDECAR_DIR}/Dockerfile" ]]; then
+    log "Skipping hydra-sidecar build; Dockerfile not found in ${HYDRA_SIDECAR_DIR}"
     return 0
   fi
 
-  log "Building token-hook image (${TOKEN_HOOK_IMAGE})"
-  docker build -t "${TOKEN_HOOK_IMAGE}" "${TOKEN_HOOK_DIR}"
-  log "Token-hook image built successfully"
+  log "Building hydra-sidecar image (${HYDRA_SIDECAR_IMAGE})"
+  # Use Makefile if available, otherwise fall back to docker build
+  if [[ -f "${HYDRA_SIDECAR_DIR}/Makefile" ]]; then
+    make -C "${HYDRA_SIDECAR_DIR}" build-local IMAGE_NAME="${HYDRA_SIDECAR_IMAGE%%:*}" IMAGE_TAG="${HYDRA_SIDECAR_IMAGE##*:}"
+  else
+    docker build -t "${HYDRA_SIDECAR_IMAGE}" "${HYDRA_SIDECAR_DIR}"
+  fi
+  log "Hydra-sidecar image built successfully"
 }
 
-load_token_hook_to_kind() {
-  if [[ ! -d "${TOKEN_HOOK_DIR}" ]]; then
+load_hydra_sidecar_to_kind() {
+  if [[ ! -d "${HYDRA_SIDECAR_DIR}" ]]; then
     return 0
   fi
 
-  log "Loading token-hook image into kind cluster ${CLUSTER_NAME}"
-  kind load docker-image "${TOKEN_HOOK_IMAGE}" --name "${CLUSTER_NAME}"
-  log "Token-hook image loaded into kind"
+  log "Loading hydra-sidecar image into kind cluster ${CLUSTER_NAME}"
+  kind load docker-image "${HYDRA_SIDECAR_IMAGE}" --name "${CLUSTER_NAME}"
+  log "Hydra-sidecar image loaded into kind"
 }
 
 
@@ -426,10 +433,23 @@ apply_hydra_reference_grant() {
   fi
 }
 
+apply_hydra_sidecar_service() {
+  if [[ -f "${HYDRA_SIDECAR_SERVICE}" ]]; then
+    log "Applying Hydra sidecar service (${HYDRA_SIDECAR_SERVICE})"
+    kubectl apply -f "${HYDRA_SIDECAR_SERVICE}"
+  fi
+}
+
 sync_hydra_clients() {
   if [[ ! -f "${HYDRA_CLIENT_SYNC_JOB}" ]]; then
     log "Skipping Hydra client sync; manifest ${HYDRA_CLIENT_SYNC_JOB} not found"
     return 0
+  fi
+
+  # Apply RBAC for client sync job (needed to create K8s secrets)
+  if [[ -f "${HYDRA_CLIENT_SYNC_RBAC}" ]]; then
+    log "Applying client sync RBAC (${HYDRA_CLIENT_SYNC_RBAC})"
+    kubectl apply -f "${HYDRA_CLIENT_SYNC_RBAC}"
   fi
 
   # Delete previous job if exists
@@ -437,8 +457,8 @@ sync_hydra_clients() {
 
   log "Syncing OAuth2 clients to Hydra (${HYDRA_CLIENT_SYNC_JOB})"
   kubectl apply -f "${HYDRA_CLIENT_SYNC_JOB}"
-  wait_for_job_completion "${HYDRA_NAMESPACE}" "hydra-client-sync" 120
-  log "OAuth2 clients synced (go-rest, demo-client)"
+  wait_for_job_completion "${HYDRA_NAMESPACE}" "hydra-client-sync" 180
+  log "OAuth2 clients synced and secrets stored in K8s"
 }
 
 deploy_workloads() {
@@ -548,8 +568,8 @@ main() {
   need helm
   need docker
 
-  # Phase 0: Build token-hook image before cluster operations
-  build_token_hook
+  # Phase 0: Build hydra-sidecar image before cluster operations
+  build_hydra_sidecar
 
   if ! kind get clusters 2>/dev/null | grep -Fxq "${CLUSTER_NAME}"; then
     log "Creating kind cluster ${CLUSTER_NAME}"
@@ -564,14 +584,15 @@ main() {
   log "Waiting for control-plane node to be Ready"
   kubectl wait --context "${KUBE_CONTEXT}" --for=condition=Ready node --all --timeout=180s >/dev/null
 
-  # Load token-hook image into kind cluster (needed for Hydra sidecar)
-  load_token_hook_to_kind
+  # Load hydra-sidecar image into kind cluster
+  load_hydra_sidecar_to_kind
 
   # Phase 1: Backend Infrastructure (must be ready before Envoy)
   deploy_redis
   install_cnpg_operator
   deploy_hydra_postgres
-  deploy_hydra  # Hydra now includes token-hook as sidecar
+  deploy_hydra  # Hydra now includes hydra-sidecar (token-hook + client sync)
+  apply_hydra_sidecar_service  # Service to expose the sidecar for client sync job
   sync_hydra_clients
   wait_for_jwks_keys
 

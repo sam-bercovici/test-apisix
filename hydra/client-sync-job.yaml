@@ -1,5 +1,5 @@
 # Ory Hydra client sync job
-# Creates OAuth2 clients from source of truth
+# Creates OAuth2 clients via hydra-sidecar and validates client_secret_hash is returned
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -29,54 +29,147 @@ spec:
                 sleep 3
               done
               echo "Hydra admin API is ready"
-      containers:
-        - name: client-sync
+        # Wait for hydra-sidecar to be ready
+        - name: wait-for-sidecar
           image: curlimages/curl:8.5.0
           command:
             - sh
             - -c
             - |
-              set -ex
-              ADMIN_URL="http://hydra-admin.hydra.svc.cluster.local:4445"
+              until curl -sf http://hydra-sidecar.hydra.svc.cluster.local:8080/ready; do
+                echo "Waiting for hydra-sidecar..."
+                sleep 3
+              done
+              echo "Hydra sidecar is ready"
+      serviceAccountName: hydra-client-sync
+      volumes:
+        - name: secrets-volume
+          emptyDir: {}
+      containers:
+        - name: client-sync
+          image: curlimages/curl:8.5.0
+          volumeMounts:
+            - name: secrets-volume
+              mountPath: /shared
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              # Use hydra-sidecar instead of direct Hydra admin API
+              # This returns client_secret_hash in addition to the normal response
+              SIDECAR_URL="http://hydra-sidecar.hydra.svc.cluster.local:8080"
+
+              # Store secrets in shared volume for kubectl sidecar
+              SECRETS_FILE="/shared/client-secrets.env"
+              > "${SECRETS_FILE}"
+
+              # Function to create client and validate response has client_secret_hash
+              create_client() {
+                local client_id="$1"
+                local payload="$2"
+
+                echo "Creating client ${client_id}..."
+
+                # Create client via sidecar
+                response=$(curl -sf -X POST "${SIDECAR_URL}/admin/clients" \
+                  -H "Content-Type: application/json" \
+                  -d "${payload}" 2>&1) || {
+                  # If creation fails (client exists), try to delete and recreate
+                  echo "Client ${client_id} may already exist, attempting delete and recreate..."
+                  curl -sf -X DELETE "http://hydra-admin.hydra.svc.cluster.local:4445/admin/clients/${client_id}" || true
+                  response=$(curl -sf -X POST "${SIDECAR_URL}/admin/clients" \
+                    -H "Content-Type: application/json" \
+                    -d "${payload}")
+                }
+
+                # Validate response contains client_secret_hash
+                echo "Response for ${client_id}:"
+                echo "${response}" | head -c 500
+                echo ""
+
+                # Check for client_secret_hash in response
+                if echo "${response}" | grep -q "client_secret_hash"; then
+                  hash=$(echo "${response}" | grep -o '"client_secret_hash":"[^"]*"' | cut -d'"' -f4)
+                  echo "SUCCESS: ${client_id} has client_secret_hash: ${hash:0:50}..."
+
+                  # Extract and store client_secret for K8s secret
+                  secret=$(echo "${response}" | grep -o '"client_secret":"[^"]*"' | cut -d'"' -f4)
+                  if [ -n "${secret}" ]; then
+                    # Convert client_id to uppercase with underscores for env var name
+                    env_name=$(echo "${client_id}" | tr '[:lower:]-' '[:upper:]_')
+                    echo "${env_name}_SECRET=${secret}" >> "${SECRETS_FILE}"
+                  fi
+                else
+                  echo "ERROR: ${client_id} response missing client_secret_hash!"
+                  echo "Full response: ${response}"
+                  exit 1
+                fi
+                echo ""
+              }
 
               # Organization: acme - Primary test organization with two services
-              echo "Creating client acme-service-1 (org: acme)..."
-              curl -sf -X POST "${ADMIN_URL}/admin/clients" \
-                -H "Content-Type: application/json" \
-                -d '{"client_id":"acme-service-1","client_secret":"acme-service-1-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write","metadata":{"org_id":"org-acme","org_name":"Acme Corporation","tier":"premium"}}' || \
-              curl -sf -X PUT "${ADMIN_URL}/admin/clients/acme-service-1" \
-                -H "Content-Type: application/json" \
-                -d '{"client_id":"acme-service-1","client_secret":"acme-service-1-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write","metadata":{"org_id":"org-acme","org_name":"Acme Corporation","tier":"premium"}}'
+              create_client "acme-service-1" \
+                '{"client_id":"acme-service-1","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write","metadata":{"enterprise_id":"org-acme","org_name":"Acme Corporation","tier":"premium","user_id":"user-acme-001"}}'
 
-              echo ""
-              echo "Creating client acme-service-2 (org: acme)..."
-              curl -sf -X POST "${ADMIN_URL}/admin/clients" \
-                -H "Content-Type: application/json" \
-                -d '{"client_id":"acme-service-2","client_secret":"acme-service-2-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read","metadata":{"org_id":"org-acme","org_name":"Acme Corporation","tier":"premium"}}' || \
-              curl -sf -X PUT "${ADMIN_URL}/admin/clients/acme-service-2" \
-                -H "Content-Type: application/json" \
-                -d '{"client_id":"acme-service-2","client_secret":"acme-service-2-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read","metadata":{"org_id":"org-acme","org_name":"Acme Corporation","tier":"premium"}}'
+              create_client "acme-service-2" \
+                '{"client_id":"acme-service-2","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read","metadata":{"enterprise_id":"org-acme","org_name":"Acme Corporation","tier":"premium","user_id":"user-acme-002"}}'
 
-              echo ""
               # Organization: demo - Secondary demo organization
-              echo "Creating client demo-client (org: demo)..."
-              curl -sf -X POST "${ADMIN_URL}/admin/clients" \
-                -H "Content-Type: application/json" \
-                -d '{"client_id":"demo-client","client_secret":"demo-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read","metadata":{"org_id":"org-demo","org_name":"Demo Organization","tier":"basic"}}' || \
-              curl -sf -X PUT "${ADMIN_URL}/admin/clients/demo-client" \
-                -H "Content-Type: application/json" \
-                -d '{"client_id":"demo-client","client_secret":"demo-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read","metadata":{"org_id":"org-demo","org_name":"Demo Organization","tier":"basic"}}'
+              create_client "demo-client" \
+                '{"client_id":"demo-client","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read","metadata":{"enterprise_id":"org-demo","org_name":"Demo Organization","tier":"basic","user_id":"user-demo-001"}}'
+
+              # Legacy client: go-rest (backward compatibility, uses client_id as enterprise_id)
+              create_client "go-rest" \
+                '{"client_id":"go-rest","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write"}'
 
               echo ""
-              # Legacy client: go-rest (backward compatibility, uses client_id as org_id)
-              echo "Creating client go-rest (legacy, no org metadata)..."
-              curl -sf -X POST "${ADMIN_URL}/admin/clients" \
-                -H "Content-Type: application/json" \
-                -d '{"client_id":"go-rest","client_secret":"go-rest-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write"}' || \
-              curl -sf -X PUT "${ADMIN_URL}/admin/clients/go-rest" \
-                -H "Content-Type: application/json" \
-                -d '{"client_id":"go-rest","client_secret":"go-rest-secret","grant_types":["client_credentials"],"token_endpoint_auth_method":"client_secret_post","scope":"read write"}'
-
+              echo "=========================================="
+              echo "Client sync completed successfully!"
+              echo "All clients have client_secret_hash returned."
+              echo "=========================================="
               echo ""
-              echo "Client sync completed successfully"
-              curl -sf "${ADMIN_URL}/admin/clients" | head -c 500
+              echo "Collected secrets:"
+              cat "${SECRETS_FILE}"
+              echo ""
+              echo "Final client list:"
+              curl -sf "http://hydra-admin.hydra.svc.cluster.local:4445/admin/clients" | head -c 1000
+
+              # Signal that secrets are ready for kubectl container
+              touch /shared/secrets-ready
+              echo ""
+              echo "Secrets file written to /shared/client-secrets.env"
+        - name: create-k8s-secret
+          image: lachlanevenson/k8s-kubectl:latest
+          volumeMounts:
+            - name: secrets-volume
+              mountPath: /shared
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for secrets file..."
+              while [ ! -f /shared/secrets-ready ]; do
+                sleep 2
+              done
+              echo "Secrets file ready, creating K8s secret..."
+
+              # Read secrets and create kubectl command args
+              SECRET_ARGS=""
+              while IFS='=' read -r key value; do
+                if [ -n "${key}" ] && [ -n "${value}" ]; then
+                  # Convert to lowercase for secret key
+                  secret_key=$(echo "${key}" | tr '[:upper:]_' '[:lower:]-')
+                  SECRET_ARGS="${SECRET_ARGS} --from-literal=${secret_key}=${value}"
+                fi
+              done < /shared/client-secrets.env
+
+              # Delete existing secret if it exists
+              kubectl delete secret hydra-client-credentials -n hydra --ignore-not-found=true
+
+              # Create new secret
+              eval "kubectl create secret generic hydra-client-credentials -n hydra ${SECRET_ARGS}"
+
+              echo "K8s secret 'hydra-client-credentials' created successfully"
+              kubectl get secret hydra-client-credentials -n hydra -o yaml | head -20

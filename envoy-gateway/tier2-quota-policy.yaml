@@ -21,7 +21,7 @@ spec:
           - name: x-tier
             value: premium
           - type: Distinct
-            name: x-org-id
+            name: x-enterprise-id
         limit:
           requests: 10000
           unit: Day
@@ -31,7 +31,7 @@ spec:
           - name: x-tier
             value: basic
           - type: Distinct
-            name: x-org-id
+            name: x-enterprise-id
         limit:
           requests: 1000
           unit: Day
@@ -39,7 +39,7 @@ spec:
       - clientSelectors:
         - headers:
           - type: Distinct
-            name: x-org-id
+            name: x-enterprise-id
         limit:
           requests: 500
           unit: Day

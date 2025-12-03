@@ -2,16 +2,16 @@
 
 ## Problem Statement
 
-Collect used quota (2nd tier rate limit) per `org_id` for usage reporting and charging. The solution must be **resilient to Redis and Envoy restarts/redeployments**.
+Collect used quota (2nd tier rate limit) per `enterprise_id` for usage reporting and charging. The solution must be **resilient to Redis and Envoy restarts/redeployments**.
 
 ### Current State
 - Two-tier rate limiting: Tier 1 (10 rps burst), Tier 2 (1000/day quota)
-- `x-org-id` header extracted from JWT `client_id` claim via SecurityPolicy
+- `x-enterprise-id` header extracted from JWT `client_id` claim via SecurityPolicy
 - Redis stores ephemeral rate limit counters (lost on restart)
 - No persistent usage tracking for billing
 
 ### Key Constraint
-Envoy's native Prometheus metrics **cannot include custom labels from request headers** like `x-org-id`. All approaches must use **access logging** to capture per-org usage.
+Envoy's native Prometheus metrics **cannot include custom labels from request headers** like `x-enterprise-id`. All approaches must use **access logging** to capture per-org usage.
 
 ---
 
@@ -19,21 +19,21 @@ Envoy's native Prometheus metrics **cannot include custom labels from request he
 
 ### Architecture
 ```
-Envoy Access Log (JSON with x-org-id)
+Envoy Access Log (JSON with x-enterprise-id)
     → OpenTelemetry Collector (OTLP gRPC)
     → Loki (durable log storage)
     → LogQL queries for billing
 ```
 
 ### Implementation
-1. Configure EnvoyProxy `telemetry.accessLog` with JSON format including `%REQ(x-org-id)%`
+1. Configure EnvoyProxy `telemetry.accessLog` with JSON format including `%REQ(x-enterprise-id)%`
 2. Deploy OpenTelemetry Collector in `monitoring` namespace
 3. Deploy Loki StatefulSet with PVC for durable storage
 4. Query usage via LogQL
 
 ### LogQL Query Example
 ```logql
-sum by (org_id) (count_over_time({service_name="envoy-gateway"} | json | org_id != "" [24h]))
+sum by (enterprise_id) (count_over_time({service_name="envoy-gateway"} | json | enterprise_id != "" [24h]))
 ```
 
 ### Pros
@@ -59,9 +59,9 @@ sum by (org_id) (count_over_time({service_name="envoy-gateway"} | json | org_id 
 
 ### Architecture
 ```
-Envoy Access Log (JSON with x-org-id)
+Envoy Access Log (JSON with x-enterprise-id)
     → OpenTelemetry Collector (OTLP gRPC)
-    → Log-to-Metric Connector (count by org_id)
+    → Log-to-Metric Connector (count by enterprise_id)
     → Prometheus (durable metrics storage)
     → PromQL queries for billing
 ```
@@ -74,7 +74,7 @@ Envoy Access Log (JSON with x-org-id)
 
 ### PromQL Query Example
 ```promql
-sum(increase(envoy_accesslog_requests_total{response_code=~"2..", org_id!=""}[24h])) by (org_id)
+sum(increase(envoy_accesslog_requests_total{response_code=~"2..", enterprise_id!=""}[24h])) by (enterprise_id)
 ```
 
 ### Pros
@@ -86,7 +86,7 @@ sum(increase(envoy_accesslog_requests_total{response_code=~"2..", org_id!=""}[24
 ### Cons
 - Loses request-level detail (only aggregates)
 - Requires OTel Collector for log-to-metric conversion
-- Cardinality concerns with many org_ids
+- Cardinality concerns with many enterprise_ids
 
 ### Files to Create/Modify
 | File | Action |
@@ -115,7 +115,7 @@ Envoy Rate Limiter
 
 ### Export Script Query
 ```bash
-redis-cli KEYS '*x-org-id*' | while read key; do
+redis-cli KEYS '*x-enterprise-id*' | while read key; do
   echo "$key: $(redis-cli GET $key)"
 done
 ```
@@ -165,9 +165,9 @@ Combine **Option 3** (Phase 1) + **Option 2** (Phase 2):
 - Rate limiting continues correctly after restarts
 
 ### Phase 2: Access Logging to Prometheus
-- Add structured access logging with `x-org-id`
+- Add structured access logging with `x-enterprise-id`
 - Deploy OTel Collector + Prometheus for billing queries
-- Provides durable, queryable usage data per org_id
+- Provides durable, queryable usage data per enterprise_id
 
 ### Why This Combination?
 1. **Phase 1 is essential** - without persistent Redis, rate limits reset on restart (users get free quota)

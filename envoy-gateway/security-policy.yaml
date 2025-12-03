@@ -4,7 +4,7 @@ metadata:
   name: jwt-auth
   namespace: default
   annotations:
-    description: "JWT authentication via Ory Hydra with org_id extraction for rate limiting"
+    description: "JWT authentication via Ory Hydra with enterprise_id extraction for rate limiting"
 spec:
   targetRefs:
   # Only apply JWT auth to go-rest-route (apitest.local)
@@ -24,10 +24,10 @@ spec:
           namespace: hydra
           port: 4444
       claimToHeaders:
-      # Extract org_id from token hook (ext namespace) for rate limiting
-      # Multiple clients can share the same org_id for shared quotas
-      - claim: ext.org_id
-        header: x-org-id
+      # Extract enterprise_id from token hook (ext namespace) for rate limiting
+      # Multiple clients can share the same enterprise_id for shared quotas
+      - claim: ext.enterprise_id
+        header: x-enterprise-id
       # Extract client_id for per-service tracking/logging
       - claim: client_id
         header: x-client-id

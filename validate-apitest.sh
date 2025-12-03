@@ -10,7 +10,16 @@ GATEWAY_HOST="${GATEWAY_HOST:-localhost}"
 GATEWAY_PORT="${GATEWAY_PORT:-8080}"
 HYDRA_TOKEN_PATH="${HYDRA_TOKEN_PATH:-/auth/oauth2/token}"
 CLIENT_ID="${CLIENT_ID:-go-rest}"
-CLIENT_SECRET="${CLIENT_SECRET:-go-rest-secret}"
+# Try to get client secret from K8s secret if not provided
+if [[ -z "${CLIENT_SECRET:-}" ]]; then
+  SECRET_KEY="go-rest-secret"  # Key format: lowercase with dashes
+  CLIENT_SECRET="$(kubectl get secret hydra-client-credentials -n hydra \
+    -o jsonpath="{.data.${SECRET_KEY}}" 2>/dev/null | base64 -d 2>/dev/null || true)"
+  if [[ -z "${CLIENT_SECRET}" ]]; then
+    echo "WARNING: Could not retrieve client secret from K8s, using default"
+    CLIENT_SECRET="go-rest-secret"
+  fi
+fi
 API_HOST="${API_HOST:-apitest.local}"
 API_PATH="${API_PATH:-/health-check}"
 HTTPBIN_HOST="${HTTPBIN_HOST:-httpbin.local}"

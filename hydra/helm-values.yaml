@@ -39,10 +39,10 @@ deployment:
     limits:
       cpu: 500m
       memory: 256Mi
-  # Token hook sidecar - injects org metadata into JWT claims
+  # Hydra sidecar - token hook + client sync + bulk sync
   extraContainers: |
-    - name: token-hook
-      image: token-hook:latest
+    - name: hydra-sidecar
+      image: hydra-sidecar:latest
       imagePullPolicy: IfNotPresent
       ports:
         - containerPort: 8080
@@ -52,6 +52,10 @@ deployment:
           value: "8080"
         - name: HYDRA_ADMIN_URL
           value: "http://localhost:4445"
+        - name: DATABASE_URL
+          value: "postgres://hydra:hydra@hydra-postgres-rw.hydra.svc.cluster.local:5432/hydra?sslmode=disable"
+        - name: HASHER_ALGORITHM
+          value: "pbkdf2"
       resources:
         requests:
           cpu: 50m
@@ -61,16 +65,16 @@ deployment:
           memory: 128Mi
       readinessProbe:
         httpGet:
-          path: /health
+          path: /ready
           port: 8080
-        initialDelaySeconds: 2
-        periodSeconds: 5
+        initialDelaySeconds: 5
+        periodSeconds: 10
       livenessProbe:
         httpGet:
           path: /health
           port: 8080
-        initialDelaySeconds: 5
-        periodSeconds: 10
+        initialDelaySeconds: 10
+        periodSeconds: 30
 
 service:
   public:

@@ -11,7 +11,16 @@ GATEWAY_HOST="${GATEWAY_HOST:-localhost}"
 GATEWAY_PORT="${GATEWAY_PORT:-8080}"
 HYDRA_TOKEN_PATH="${HYDRA_TOKEN_PATH:-/auth/oauth2/token}"
 CLIENT_ID="${CLIENT_ID:-go-rest}"
-CLIENT_SECRET="${CLIENT_SECRET:-go-rest-secret}"
+# Try to get client secret from K8s secret if not provided
+if [[ -z "${CLIENT_SECRET:-}" ]]; then
+  SECRET_KEY="go-rest-secret"  # Key format: lowercase with dashes
+  CLIENT_SECRET="$(kubectl get secret hydra-client-credentials -n hydra \
+    -o jsonpath="{.data.${SECRET_KEY}}" 2>/dev/null | base64 -d 2>/dev/null || true)"
+  if [[ -z "${CLIENT_SECRET}" ]]; then
+    echo "WARNING: Could not retrieve client secret from K8s, using default"
+    CLIENT_SECRET="go-rest-secret"
+  fi
+fi
 API_HOST="${API_HOST:-apitest.local}"
 API_PATH="${API_PATH:-/health-check}"
 RL_SAMPLE_SIZE="${RL_SAMPLE_SIZE:-30}"
@@ -113,10 +122,15 @@ log "Sending ${RL_SAMPLE_SIZE} requests in parallel..."
 status_series="$(collect_statuses curl_bearer "$RL_SAMPLE_SIZE")"
 
 # Count responses
-count_200=$(grep -c '^200$' <<<"$status_series" || echo 0)
-count_429=$(grep -c '^429$' <<<"$status_series" || echo 0)
-count_401=$(grep -c '^401$' <<<"$status_series" || echo 0)
-count_other=$(grep -cv '^200$\|^429$\|^401$' <<<"$status_series" || echo 0)
+count_200=$(grep -c '^200$' <<<"$status_series" 2>/dev/null || true)
+count_429=$(grep -c '^429$' <<<"$status_series" 2>/dev/null || true)
+count_401=$(grep -c '^401$' <<<"$status_series" 2>/dev/null || true)
+count_other=$(grep -cvE '^(200|429|401)$' <<<"$status_series" 2>/dev/null || true)
+# Default to 0 if empty
+count_200=${count_200:-0}
+count_429=${count_429:-0}
+count_401=${count_401:-0}
+count_other=${count_other:-0}
 
 log "Results: 200=${count_200}, 429=${count_429}, 401=${count_401}, other=${count_other}"
 

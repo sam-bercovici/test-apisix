@@ -32,7 +32,7 @@ status: Draft
 #### 2.2.2 The JWT configuration MUST run in bearer-only mode so that requests without tokens receive HTTP 401 and automated clients can supply tokens without browser redirects.
 #### 2.2.3 The `SecurityPolicy` MUST target only routes requiring authentication (go-rest-route); httpbin MUST remain unauthenticated.
 #### 2.2.4 JWT claims MUST be extracted to headers for downstream rate limiting and logging:
-- `ext.org_id` → `x-org-id` (for shared quota across organization)
+- `ext.enterprise_id` → `x-enterprise-id` (for shared quota across organization)
 - `client_id` → `x-client-id` (for per-client burst protection)
 - `ext.tier` → `x-tier` (for tiered rate limiting)
 
@@ -45,7 +45,7 @@ status: Draft
 - Default: 5 rps per client
 - Unauthenticated: 5 rps per IP (fallback)
 
-#### 2.3.3 **Tier 2 (Daily Quota)**: Tiered requests per day per organization (`x-org-id` header). All clients in the same organization share this quota:
+#### 2.3.3 **Tier 2 (Daily Quota)**: Tiered requests per day per organization (`x-enterprise-id` header). All clients in the same organization share this quota:
 - Premium: 10,000 requests/day per org
 - Basic: 1,000 requests/day per org
 - Default: 500 requests/day per org
@@ -218,7 +218,7 @@ Initiates the OAuth2 authorization code flow for interactive (browser-based) aut
 
 ### 6.2 Configured OAuth2 Clients
 
-Clients are organized by organization. Multiple clients can share the same `org_id` for shared rate limit quotas.
+Clients are organized by organization. Multiple clients can share the same `enterprise_id` for shared rate limit quotas.
 
 | Client ID | Secret | Org ID | Tier | Scopes | Purpose |
 |-----------|--------|--------|------|--------|---------|
@@ -238,7 +238,7 @@ Multiple OAuth2 clients can be bound to a single organization using the **token 
    {
      "client_id": "acme-service-1",
      "metadata": {
-       "org_id": "org-acme",
+       "enterprise_id": "org-acme",
        "org_name": "Acme Corporation",
        "tier": "premium"
      }
@@ -254,7 +254,7 @@ Multiple OAuth2 clients can be bound to a single organization using the **token 
      "sub": "acme-service-1",
      "client_id": "acme-service-1",
      "ext": {
-       "org_id": "org-acme",
+       "enterprise_id": "org-acme",
        "org_name": "Acme Corporation",
        "tier": "premium"
      }
@@ -262,7 +262,7 @@ Multiple OAuth2 clients can be bound to a single organization using the **token 
    ```
 
 4. **Header Extraction**: SecurityPolicy extracts claims to headers for rate limiting:
-   - `ext.org_id` → `x-org-id` (used for rate limiting)
+   - `ext.enterprise_id` → `x-enterprise-id` (used for rate limiting)
    - `client_id` → `x-client-id` (for per-service tracking)
    - `ext.tier` → `x-tier` (for tiered rate limiting)
 
@@ -271,7 +271,7 @@ Multiple OAuth2 clients can be bound to a single organization using the **token 
 - **Shared Quotas**: `acme-service-1` and `acme-service-2` share the same daily quota under `org-acme`
 - **Per-Service Tracking**: Individual `client_id` is still available for logging/auditing
 - **Tiered Limits**: `x-tier` header enables different rate limits for premium vs basic orgs
-- **Backward Compatibility**: Legacy clients without metadata use `client_id` as fallback `org_id`
+- **Backward Compatibility**: Legacy clients without metadata use `client_id` as fallback `enterprise_id`
 
 #### Configuration Files
 
@@ -302,16 +302,16 @@ sequenceDiagram
     Client->>GW: POST /auth/oauth2/token<br/>grant_type=client_credentials<br/>client_id=acme-service-1&client_secret=...
     GW->>Hydra: Forward token request
     Hydra->>Hook: Token hook (client metadata)
-    Hook-->>Hydra: {org_id: "org-acme", tier: "premium"}
-    Hydra-->>GW: JWT with ext.org_id claim
+    Hook-->>Hydra: {enterprise_id: "org-acme", tier: "premium"}
+    Hydra-->>GW: JWT with ext.enterprise_id claim
     GW-->>Client: {"access_token": "eyJ...", "token_type": "Bearer"}
 
     Note over Client,API: Step 2: Access Protected API
 
     Client->>GW: GET /health-check<br/>Host: apitest.local<br/>Authorization: Bearer eyJ...
     GW->>GW: Validate JWT (fetch JWKS)
-    GW->>GW: Extract ext.org_id → x-org-id
-    GW->>API: Forward request + x-org-id header
+    GW->>GW: Extract ext.enterprise_id → x-enterprise-id
+    GW->>API: Forward request + x-enterprise-id header
     API-->>GW: 200 OK
     GW-->>Client: 200 OK
 ```
@@ -355,7 +355,7 @@ The two-tier rate limiting architecture ensures burst protection while enforcing
 
 **Key distinction:**
 - **Tier 1 (Burst)**: Per-client limit using `x-client-id` - each client gets its own burst limit based on tier
-- **Tier 2 (Quota)**: Per-org limit using `x-org-id` - all clients in an org share daily quota based on tier
+- **Tier 2 (Quota)**: Per-org limit using `x-enterprise-id` - all clients in an org share daily quota based on tier
 
 ```mermaid
 flowchart LR
@@ -431,8 +431,8 @@ sequenceDiagram
     alt JWT Invalid
         Gateway-->>Client: 401 Unauthorized
     else JWT Valid
-        Gateway->>Gateway: Extract claims:<br/>ext.org_id → x-org-id<br/>client_id → x-client-id<br/>ext.tier → x-tier
-        Gateway->>Backend: Forward request<br/>+ x-org-id, x-client-id, x-tier headers
+        Gateway->>Gateway: Extract claims:<br/>ext.enterprise_id → x-enterprise-id<br/>client_id → x-client-id<br/>ext.tier → x-tier
+        Gateway->>Backend: Forward request<br/>+ x-enterprise-id, x-client-id, x-tier headers
         Backend-->>Gateway: 200 OK + response
         Gateway-->>Client: 200 OK + response
     end

@@ -11,7 +11,7 @@ This repository packages Envoy Gateway manifests for routing demo services with 
 ### Directory Structure
 - `envoy-gateway/` - Envoy Gateway configuration (GatewayClass, Gateway, policies)
 - `routes/` - HTTPRoute definitions for each service
-- `workloads/` - Application deployments (httpbin, go-rest-api, token-hook)
+- `workloads/` - Application deployments (httpbin, go-rest-api, hydra-sidecar)
 - `redis/` - Redis deployment for rate limit counters
 - `hydra/` - Ory Hydra OAuth2/OIDC stack (Helm-based with CloudNativePG)
 - `plans/` - Architecture and migration documentation
@@ -29,7 +29,8 @@ This repository packages Envoy Gateway manifests for routing demo services with 
 - `hydra/reference-grant.yaml` - Cross-namespace access for SecurityPolicy JWKS
 - `routes/*.yaml` - HTTPRoute definitions for httpbin, go-rest-api, and Hydra (public and internal)
 - `hydra/client-sync-job.yaml` - OAuth2 client provisioning with org metadata
-- `workloads/token-hook/` - Token hook sidecar (Go) for injecting org_id/tier into JWT claims
+- `hydra/hydra-sidecar-service.yaml` - K8s service for hydra-sidecar (external access to sync API)
+- `workloads/hydra-sidecar/` - Hydra sidecar (Go) for token-hook, client creation with hash, and bulk sync
 
 ## Build, Test, and Development Commands
 
@@ -44,6 +45,24 @@ This repository packages Envoy Gateway manifests for routing demo services with 
 ./validate-apitest.sh
 ./validate-rate_limit.sh
 ```
+
+### Hydra Sidecar Build Commands
+
+Go module operations must be run via the Makefile using the build container (no local Go installation required):
+
+```bash
+# Tidy go modules (runs in golang:1.21-alpine container)
+make -C workloads/hydra-sidecar tidy
+
+# Build image for local Kind cluster
+make -C workloads/hydra-sidecar build-local
+
+# Load image into Kind and restart deployment
+kind load docker-image hydra-sidecar:latest --name kind
+kubectl rollout restart deployment/hydra -n hydra
+```
+
+**Important:** Never run `go mod tidy` directly - always use `make tidy` to ensure consistent Go version and environment.
 
 ### Manual Commands
 ```bash
