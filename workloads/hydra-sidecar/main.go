@@ -1,19 +1,19 @@
 // Package main Hydra Sidecar API
 //
-// Sidecar service for Ory Hydra that provides token hook functionality,
-// client creation with secret hashing, and bulk client sync.
+// Hydra sidecar for token hooks, client management, and bulk sync.
 //
-//	@title			Hydra Sidecar API
-//	@version		1.0
-//	@description	Sidecar service for Ory Hydra that provides token hook functionality, client creation with secret hashing, and bulk client sync.
+//	Schemes: http, https
+//	Host: localhost:8080
+//	BasePath: /
+//	Version: 1.0.0
 //
-//	@contact.name	API Support
+//	Consumes:
+//	- application/json
 //
-//	@license.name	Apache 2.0
-//	@license.url	http://www.apache.org/licenses/LICENSE-2.0.html
+//	Produces:
+//	- application/json
 //
-//	@host			localhost:8080
-//	@BasePath		/
+// swagger:meta
 package main
 
 import (

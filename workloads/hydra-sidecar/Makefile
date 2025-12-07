@@ -69,19 +69,16 @@ vuln: ## Run Go vulnerability check - fails on ANY vulnerability (https://go.dev
 
 ##@ Documentation
 
-swagger: ## Generate Swagger/OpenAPI docs (runs in container)
+swagger: ## Generate Swagger/OpenAPI docs using go-swagger (same tool as Hydra)
 	docker run --rm \
 		-v "$$(pwd):/app" \
 		-w /app \
 		$(GO_IMAGE) \
-		sh -c "go install github.com/swaggo/swag/cmd/swag@latest && swag init -g main.go -o ./docs"
-
-swagger-fmt: ## Format Swagger annotations
-	docker run --rm \
-		-v "$$(pwd):/app" \
-		-w /app \
-		$(GO_IMAGE) \
-		sh -c "go install github.com/swaggo/swag/cmd/swag@latest && swag fmt"
+		sh -c "go install github.com/go-swagger/go-swagger/cmd/swagger@latest && \
+		       swagger generate spec -m -o ./docs/swagger.json \
+		         --include=github.com/example/hydra-sidecar \
+		         --include-tag=clients --include-tag=hooks --include-tag=health && \
+		       swagger validate ./docs/swagger.json"
 
 ##@ Version Management
 

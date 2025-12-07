@@ -98,22 +98,6 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.conn.RawQuery("SELECT 1").Exec()
 }
 
-// SyncResult holds the results of a sync operation
-type SyncResult struct {
-	CreatedCount int            `json:"created_count" example:"5"`
-	UpdatedCount int            `json:"updated_count" example:"3"`
-	DeletedCount int            `json:"deleted_count" example:"1"`
-	FailedCount  int            `json:"failed_count" example:"0"`
-	Results      []ClientResult `json:"results"`
-}
-
-// ClientResult holds the result for a single client operation
-type ClientResult struct {
-	ClientID string  `json:"client_id" example:"acme-service-1"`
-	Status   string  `json:"status" example:"created"` // "created", "updated", "deleted", "failed"
-	Error    *string `json:"error,omitempty"`
-}
-
 // SyncClients performs full reconciliation of clients
 func (s *Store) SyncClients(ctx context.Context, clients []client.Client, nid uuid.UUID) (*SyncResult, error) {
 	result := &SyncResult{

@@ -92,17 +92,78 @@ func validateHash(hash []byte, algorithm string) error {
 
 ## API Specification
 
+### API Models
+
+Uses **go-swagger** (same tool as Hydra) with `swagger:allOf` composition.
+
+| Model | Description |
+|-------|-------------|
+| `oAuth2Client` | Hydra's client model (from `github.com/ory/hydra/v2/client.Client`) |
+| `clientData` | `oAuth2Client` + `client_secret_hash` (via swagger:allOf) |
+| `syncClientsRequest` | `{ clients: []clientData }` |
+| `syncResult` | Sync operation result with counts and per-client status |
+| `rotateClientRequest` | Optional body for secret rotation |
+
+### `client_secret` Field Behavior by Endpoint
+
+| Endpoint | Method | `client_secret` | `client_secret_hash` |
+|----------|--------|-----------------|----------------------|
+| `/admin/clients` | POST request | Optional (for testing, Hydra generates if empty) | - |
+| `/admin/clients` | POST response | **Plaintext** (show to user, never store) | **Hash** (store this) |
+| `/admin/clients/{id}` | GET response | Empty (Hydra never returns it) | - |
+| `/admin/clients/rotate/{id}` | POST response | **Plaintext** (new secret, show to user) | **Hash** (new hash, store this) |
+| `/sync/clients` | POST request | **Hash** (the stored `client_secret_hash`) | Ignored |
+| `/sync/clients` | POST response | - | - (returns `syncResult`) |
+
+---
+
 ### API 1: Enhanced Client Creation
 
 **Endpoint**: `POST /admin/clients`
 
 Proxies to Hydra, then enriches response with hashed secret from DB.
 
-**Request**: Same as Hydra's `/admin/clients` (uses `client.Client` struct)
+**Request**: `oAuth2Client` - passthrough to Hydra (same as Hydra's `/admin/clients`)
 
-**Response**: Hydra response + `client_secret_hash` field added
+**Response**: `clientData` - Hydra response + `client_secret_hash` field added
 
-### API 2: Bulk Sync (Full Reconciliation)
+```json
+{
+  "client_id": "acme-service-1",
+  "client_secret": "plaintext-secret-abc123",
+  "client_secret_hash": "$pbkdf2-sha256$i=25000,l=32$salt$hash",
+  "client_name": "Acme Service 1",
+  "grant_types": ["client_credentials"],
+  "scope": "read write",
+  "metadata": {"enterprise_id": "org-acme", "tier": "premium"},
+  "created_at": "2024-01-01T00:00:00Z"
+}
+```
+
+### API 2: Get Client
+
+**Endpoint**: `GET /admin/clients/{client_id}`
+
+Passthrough to Hydra - returns `oAuth2Client` directly.
+
+**Note**: `client_secret` is never returned by Hydra on GET.
+
+### API 3: Rotate Client Secret
+
+**Endpoint**: `POST /admin/clients/rotate/{client_id}`
+
+Rotates the client secret and returns the new secret with its hash.
+
+**Request**: `rotateClientRequest` (optional)
+```json
+{
+  "client_secret_expires_at": 1735689600
+}
+```
+
+**Response**: `clientData` - same as creation response with new secret
+
+### API 4: Bulk Sync (Full Reconciliation)
 
 **Endpoint**: `POST /sync/clients`
 
@@ -113,7 +174,7 @@ Full reconciliation - Hydra's client table will exactly match the request.
 2. Upsert all clients from the request
 3. **Delete** any clients in Hydra NOT present in the request
 
-**Request**: Array of `client.Client` objects with `client_secret` containing the hash
+**Request**: `syncClientsRequest` - Array of `clientData` with `client_secret` containing the **hash**
 ```json
 {
   "clients": [
@@ -130,7 +191,9 @@ Full reconciliation - Hydra's client table will exactly match the request.
 }
 ```
 
-**Response**:
+**Note**: In sync requests, `client_secret` contains the hash (from `client_secret_hash` in creation response). The `client_secret_hash` field is ignored.
+
+**Response**: `syncResult`
 ```json
 {
   "created_count": 1,
@@ -169,7 +232,7 @@ func (s *Store) SyncClients(ctx context.Context, clients []client.Client) (SyncR
 }
 ```
 
-### API 3: Token Hook (Migrated)
+### API 5: Token Hook (Migrated)
 
 **Endpoint**: `POST /token-hook`
 
@@ -205,15 +268,17 @@ workloads/hydra-sidecar/
 ```go
 module github.com/example/hydra-sidecar
 
-go 1.21
+go 1.25
 
 require (
-    github.com/ory/hydra/client      // Client struct, no custom types
-    github.com/ory/x/hasherx         // Hash format validation
+    github.com/ory/hydra/v2          // Client struct, types
+    github.com/ory/x                 // Hash format validation, sqlxx
     github.com/gobuffalo/pop/v6      // Database ORM (same as Hydra)
-    github.com/google/uuid
+    github.com/gofrs/uuid
 )
 ```
+
+**Note**: No swaggo/swag dependency - uses go-swagger for OpenAPI generation.
 
 ### Step 3: Database Store (`store.go`)
 
@@ -441,11 +506,14 @@ Delete `workloads/token-hook/` directory (functionality merged into hydra-sideca
 
 | File | Action | Description |
 |------|--------|-------------|
-| `workloads/hydra-sidecar/main.go` | Create | Entry point, config |
-| `workloads/hydra-sidecar/handlers.go` | Create | HTTP handlers (token-hook + client APIs) |
+| `workloads/hydra-sidecar/main.go` | Create | Entry point, config, swagger:meta annotation |
+| `workloads/hydra-sidecar/models.go` | Create | API models with go-swagger annotations (`ClientData`, `SyncClientsRequest`, etc.) |
+| `workloads/hydra-sidecar/handlers.go` | Create | HTTP handlers with swagger:route annotations |
 | `workloads/hydra-sidecar/store.go` | Create | DB ops using pop |
-| `workloads/hydra-sidecar/go.mod` | Create | Ory dependencies |
+| `workloads/hydra-sidecar/go.mod` | Create | Ory dependencies (no swaggo) |
 | `workloads/hydra-sidecar/Dockerfile` | Create | Multi-arch distroless build |
+| `workloads/hydra-sidecar/Makefile` | Create | Build targets including `swagger` (uses go-swagger) |
+| `workloads/hydra-sidecar/docs/` | Generated | Swagger/OpenAPI spec files |
 | `hydra/helm-values.yaml` | Modify | Shared config + unified sidecar |
 | `hydra/hydra-sidecar-service.yaml` | Create | K8s service (optional) |
 | `redeploy.sh` | Modify | Replace token-hook with hydra-sidecar |

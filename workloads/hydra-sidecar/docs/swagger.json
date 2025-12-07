@@ -1,655 +1,790 @@
 {
-    "swagger": "2.0",
-    "info": {
-        "description": "Sidecar service for Ory Hydra that provides token hook functionality, client creation with secret hashing, and bulk client sync.",
-        "title": "Hydra Sidecar API",
-        "contact": {
-            "name": "API Support"
-        },
-        "license": {
-            "name": "Apache 2.0",
-            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
-        },
-        "version": "1.0"
-    },
-    "host": "localhost:8080",
-    "basePath": "/",
-    "paths": {
-        "/admin/clients": {
-            "post": {
-                "description": "Proxies client creation to Hydra Admin API and returns the response enriched with client_secret_hash",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "clients"
-                ],
-                "summary": "Create OAuth2 client",
-                "parameters": [
-                    {
-                        "description": "Client configuration",
-                        "name": "client",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/main.HydraClientResponse"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Client created with secret hash",
-                        "schema": {
-                            "$ref": "#/definitions/main.EnhancedClientResponse"
-                        }
-                    },
-                    "201": {
-                        "description": "Client created with secret hash",
-                        "schema": {
-                            "$ref": "#/definitions/main.EnhancedClientResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "502": {
-                        "description": "Failed to create client in Hydra",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "http",
+    "https"
+  ],
+  "swagger": "2.0",
+  "info": {
+    "description": "Hydra sidecar for token hooks, client management, and bulk sync.",
+    "title": "Hydra Sidecar API",
+    "version": "1.0.0"
+  },
+  "host": "localhost:8080",
+  "basePath": "/",
+  "paths": {
+    "/admin/clients": {
+      "post": {
+        "description": "Proxies client creation to Hydra Admin API and returns the response enriched with client_secret_hash.\n\nResponse fields:\nclient_secret: Plaintext secret (show to user, NEVER store)\nclient_secret_hash: Hash of secret (store this for sync)",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "clients"
+        ],
+        "summary": "Create OAuth2 client.",
+        "operationId": "createClient",
+        "parameters": [
+          {
+            "description": "OAuth2 client configuration (passed through to Hydra)",
+            "name": "Body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/oAuth2Client"
             }
-        },
-        "/admin/clients/rotate/{client_id}": {
-            "post": {
-                "description": "Rotates the client secret and returns the new secret along with its hash from the database. Optionally accepts client_secret_expires_at to set expiration for the new secret.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "clients"
-                ],
-                "summary": "Rotate client secret",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Client ID",
-                        "name": "client_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Optional expiration settings",
-                        "name": "request",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/main.RotateClientRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Client with new secret and hash",
-                        "schema": {
-                            "$ref": "#/definitions/main.EnhancedClientResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request - missing client_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Client not found",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "502": {
-                        "description": "Failed to rotate client secret in Hydra",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/clients/{client_id}": {
-            "get": {
-                "description": "Retrieves a client from Hydra by client_id",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "clients"
-                ],
-                "summary": "Get OAuth2 client",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Client ID",
-                        "name": "client_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Client details",
-                        "schema": {
-                            "$ref": "#/definitions/main.HydraClientResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request - missing client_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Client not found",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "502": {
-                        "description": "Failed to get client from Hydra",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Deletes a client from Hydra by client_id",
-                "tags": [
-                    "clients"
-                ],
-                "summary": "Delete OAuth2 client",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Client ID to delete",
-                        "name": "client_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "Client deleted"
-                    },
-                    "400": {
-                        "description": "Bad request - missing client_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Client not found",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "502": {
-                        "description": "Failed to delete client in Hydra",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/health": {
-            "get": {
-                "description": "Returns OK if the server is running (liveness probe)",
-                "produces": [
-                    "text/plain"
-                ],
-                "tags": [
-                    "health"
-                ],
-                "summary": "Health check",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/ready": {
-            "get": {
-                "description": "Returns OK if the database connection is healthy (readiness probe)",
-                "produces": [
-                    "text/plain"
-                ],
-                "tags": [
-                    "health"
-                ],
-                "summary": "Readiness check",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "503": {
-                        "description": "Database not ready",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/sync/clients": {
-            "post": {
-                "description": "Performs full reconciliation of clients - creates new, updates existing, deletes removed. Expects pre-hashed secrets.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "clients"
-                ],
-                "summary": "Bulk sync OAuth2 clients",
-                "parameters": [
-                    {
-                        "description": "List of clients to sync",
-                        "name": "clients",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/main.SyncClientsRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Sync completed",
-                        "schema": {
-                            "$ref": "#/definitions/main.SyncResult"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request - invalid JSON or hash format",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal error during sync",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/token-hook": {
-            "post": {
-                "description": "Called by Hydra during token issuance to inject client metadata into JWT claims. Rejects expired clients.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "hooks"
-                ],
-                "summary": "Token hook for JWT claim injection",
-                "parameters": [
-                    {
-                        "description": "Token hook request from Hydra",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/main.TokenHookRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Token hook response with custom claims",
-                        "schema": {
-                            "$ref": "#/definitions/main.TokenHookResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "403": {
-                        "description": "Client expired",
-                        "schema": {
-                            "$ref": "#/definitions/main.TokenHookErrorResponse"
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "$ref": "#/responses/clientDataResponse"
+          },
+          "400": {
+            "$ref": "#/responses/errorResponse"
+          },
+          "502": {
+            "$ref": "#/responses/errorResponse"
+          }
         }
+      }
     },
-    "definitions": {
-        "main.ClientResult": {
-            "type": "object",
-            "properties": {
-                "client_id": {
-                    "type": "string",
-                    "example": "acme-service-1"
-                },
-                "error": {
-                    "type": "string"
-                },
-                "status": {
-                    "description": "\"created\", \"updated\", \"deleted\", \"failed\"",
-                    "type": "string",
-                    "example": "created"
-                }
+    "/admin/clients/rotate/{client_id}": {
+      "post": {
+        "description": "Rotates the client secret and returns the new secret along with its hash.\nOptionally accepts client_secret_expires_at to set expiration for the new secret.\n\nResponse fields:\nclient_secret: New plaintext secret (show to user, NEVER store)\nclient_secret_hash: Hash of new secret (update stored value)",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "clients"
+        ],
+        "summary": "Rotate client secret.",
+        "operationId": "rotateClient",
+        "parameters": [
+          {
+            "type": "string",
+            "x-go-name": "ClientID",
+            "description": "Client ID",
+            "name": "client_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "Optional rotation settings",
+            "name": "Body",
+            "in": "body",
+            "schema": {
+              "$ref": "#/definitions/rotateClientRequest"
             }
-        },
-        "main.EnhancedClientResponse": {
-            "type": "object",
-            "properties": {
-                "client_credentials_grant_access_token_lifespan": {
-                    "description": "Access token lifespan for client_credentials grant",
-                    "type": "string",
-                    "example": "1h"
-                },
-                "client_id": {
-                    "description": "OAuth2 client ID",
-                    "type": "string",
-                    "example": "acme-service-1"
-                },
-                "client_name": {
-                    "description": "Human-readable client name",
-                    "type": "string",
-                    "example": "Acme Service 1"
-                },
-                "client_secret": {
-                    "description": "Client secret (only returned on creation)",
-                    "type": "string",
-                    "example": "secret123"
-                },
-                "client_secret_expires_at": {
-                    "description": "Unix timestamp when client secret expires (0 = never)",
-                    "type": "integer",
-                    "example": 1735689600
-                },
-                "client_secret_hash": {
-                    "type": "string",
-                    "example": "$pbkdf2-sha512$..."
-                },
-                "metadata": {
-                    "description": "Client metadata",
-                    "type": "object",
-                    "additionalProperties": true
-                }
-            }
-        },
-        "main.HydraClientResponse": {
-            "type": "object",
-            "properties": {
-                "client_credentials_grant_access_token_lifespan": {
-                    "description": "Access token lifespan for client_credentials grant",
-                    "type": "string",
-                    "example": "1h"
-                },
-                "client_id": {
-                    "description": "OAuth2 client ID",
-                    "type": "string",
-                    "example": "acme-service-1"
-                },
-                "client_name": {
-                    "description": "Human-readable client name",
-                    "type": "string",
-                    "example": "Acme Service 1"
-                },
-                "client_secret": {
-                    "description": "Client secret (only returned on creation)",
-                    "type": "string",
-                    "example": "secret123"
-                },
-                "client_secret_expires_at": {
-                    "description": "Unix timestamp when client secret expires (0 = never)",
-                    "type": "integer",
-                    "example": 1735689600
-                },
-                "metadata": {
-                    "description": "Client metadata",
-                    "type": "object",
-                    "additionalProperties": true
-                }
-            }
-        },
-        "main.RotateClientRequest": {
-            "type": "object",
-            "properties": {
-                "client_secret_expires_at": {
-                    "description": "Unix timestamp when the new client secret expires, 0 means never (optional)",
-                    "type": "integer",
-                    "example": 1735689600
-                }
-            }
-        },
-        "main.SyncClient": {
-            "type": "object",
-            "properties": {
-                "audience": {
-                    "description": "Allowed audiences (optional)",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "client_credentials_grant_access_token_lifespan": {
-                    "description": "Access token lifespan for client_credentials grant, e.g. \"1h\", \"30m\" (optional)",
-                    "type": "string",
-                    "example": "1h"
-                },
-                "client_id": {
-                    "description": "Client ID (required)",
-                    "type": "string",
-                    "example": "acme-service-1"
-                },
-                "client_name": {
-                    "description": "Human-readable client name (optional)",
-                    "type": "string",
-                    "example": "Acme Service 1"
-                },
-                "client_secret": {
-                    "description": "Pre-hashed client secret (required)",
-                    "type": "string",
-                    "example": "$pbkdf2-sha512$..."
-                },
-                "client_secret_expires_at": {
-                    "description": "Unix timestamp when client secret expires, 0 means never (optional)",
-                    "type": "integer",
-                    "example": 1735689600
-                },
-                "grant_types": {
-                    "description": "OAuth2 grant types (optional, defaults to [\"client_credentials\"])",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "client_credentials"
-                    ]
-                },
-                "metadata": {
-                    "description": "Client metadata for JWT claims (optional)",
-                    "type": "object",
-                    "additionalProperties": true
-                },
-                "redirect_uris": {
-                    "description": "Redirect URIs (optional)",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "response_types": {
-                    "description": "OAuth2 response types (optional)",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "example": [
-                        "token"
-                    ]
-                },
-                "scope": {
-                    "description": "Space-separated list of scopes (optional)",
-                    "type": "string",
-                    "example": "read write"
-                },
-                "token_endpoint_auth_method": {
-                    "description": "Token endpoint auth method (optional, defaults to \"client_secret_basic\")",
-                    "type": "string",
-                    "example": "client_secret_basic"
-                }
-            }
-        },
-        "main.SyncClientsRequest": {
-            "type": "object",
-            "properties": {
-                "clients": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/main.SyncClient"
-                    }
-                }
-            }
-        },
-        "main.SyncResult": {
-            "type": "object",
-            "properties": {
-                "created_count": {
-                    "type": "integer",
-                    "example": 5
-                },
-                "deleted_count": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "failed_count": {
-                    "type": "integer",
-                    "example": 0
-                },
-                "results": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/main.ClientResult"
-                    }
-                },
-                "updated_count": {
-                    "type": "integer",
-                    "example": 3
-                }
-            }
-        },
-        "main.TokenHookErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string"
-                },
-                "error_description": {
-                    "type": "string"
-                }
-            }
-        },
-        "main.TokenHookRequest": {
-            "type": "object",
-            "properties": {
-                "request": {
-                    "type": "object",
-                    "properties": {
-                        "client_id": {
-                            "type": "string",
-                            "example": "acme-service-1"
-                        },
-                        "granted_scopes": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            },
-                            "example": [
-                                "read",
-                                "write"
-                            ]
-                        }
-                    }
-                },
-                "session": {
-                    "type": "object",
-                    "properties": {
-                        "client_id": {
-                            "type": "string",
-                            "example": "acme-service-1"
-                        }
-                    }
-                }
-            }
-        },
-        "main.TokenHookResponse": {
-            "type": "object",
-            "properties": {
-                "session": {
-                    "type": "object",
-                    "properties": {
-                        "access_token": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/clientDataResponse"
+          },
+          "400": {
+            "$ref": "#/responses/errorResponse"
+          },
+          "404": {
+            "$ref": "#/responses/errorResponse"
+          },
+          "502": {
+            "$ref": "#/responses/errorResponse"
+          }
         }
+      }
+    },
+    "/admin/clients/{client_id}": {
+      "get": {
+        "description": "Returns client details from Hydra (passthrough). Note: client_secret is never returned by Hydra.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "clients"
+        ],
+        "summary": "Get OAuth2 client.",
+        "operationId": "getClient",
+        "parameters": [
+          {
+            "type": "string",
+            "x-go-name": "ClientID",
+            "description": "Client ID",
+            "name": "client_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/clientDataResponse"
+          },
+          "404": {
+            "$ref": "#/responses/errorResponse"
+          },
+          "502": {
+            "$ref": "#/responses/errorResponse"
+          }
+        }
+      },
+      "delete": {
+        "description": "Deletes a client from Hydra by client_id.",
+        "tags": [
+          "clients"
+        ],
+        "summary": "Delete OAuth2 client.",
+        "operationId": "deleteClient",
+        "parameters": [
+          {
+            "type": "string",
+            "x-go-name": "ClientID",
+            "description": "Client ID",
+            "name": "client_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/responses/noContent"
+          },
+          "404": {
+            "$ref": "#/responses/errorResponse"
+          },
+          "502": {
+            "$ref": "#/responses/errorResponse"
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Returns OK if the server is running.",
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "health"
+        ],
+        "summary": "Health check (liveness probe).",
+        "operationId": "healthCheck",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/healthResponse"
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "description": "Returns OK if the database connection is healthy.",
+        "produces": [
+          "text/plain"
+        ],
+        "tags": [
+          "health"
+        ],
+        "summary": "Readiness check (readiness probe).",
+        "operationId": "readinessCheck",
+        "responses": {
+          "200": {
+            "$ref": "#/responses/healthResponse"
+          },
+          "503": {
+            "$ref": "#/responses/errorResponse"
+          }
+        }
+      }
+    },
+    "/sync/clients": {
+      "post": {
+        "description": "Performs full reconciliation of clients - creates new, updates existing, deletes removed.\n\nRequest field behavior:\nclient_secret: Must contain the stored hash (from client_secret_hash in creation response)\nclient_secret_hash: Ignored (use client_secret for the hash)",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "clients"
+        ],
+        "summary": "Bulk sync OAuth2 clients.",
+        "operationId": "syncClients",
+        "parameters": [
+          {
+            "description": "Clients to sync (client_secret must contain the stored hash)",
+            "name": "Body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/syncClientsRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/syncResultResponse"
+          },
+          "400": {
+            "$ref": "#/responses/errorResponse"
+          },
+          "500": {
+            "$ref": "#/responses/errorResponse"
+          }
+        }
+      }
+    },
+    "/token-hook": {
+      "post": {
+        "description": "Called by Hydra during token issuance to inject client metadata into JWT claims.\nRejects expired clients with 403 Forbidden.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "hooks"
+        ],
+        "summary": "Token hook for JWT claim injection.",
+        "operationId": "tokenHook",
+        "parameters": [
+          {
+            "description": "Token hook request from Hydra",
+            "name": "Body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/tokenHookRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/tokenHookResponseWrapper"
+          },
+          "400": {
+            "$ref": "#/responses/errorResponse"
+          },
+          "403": {
+            "$ref": "#/responses/tokenHookErrorResponseWrapper"
+          }
+        }
+      }
     }
+  },
+  "definitions": {
+    "JSONRawMessage": {
+      "type": "object",
+      "title": "JSONRawMessage represents a json.RawMessage that works well with JSON, SQL, and Swagger.",
+      "x-go-package": "github.com/ory/x/sqlxx"
+    },
+    "NullDuration": {
+      "description": "TODO delete this type and replace it with ory/x/sqlxx/NullDuration when applying the custom client token TTL patch to Hydra 2.x",
+      "title": "NullDuration represents a nullable JSON and SQL compatible time.Duration."
+    },
+    "StringSliceJSONFormat": {
+      "type": "array",
+      "title": "StringSliceJSONFormat represents []string{} which is encoded to/from JSON for SQL storage.",
+      "items": {
+        "type": "string"
+      },
+      "x-go-package": "github.com/ory/x/sqlxx"
+    },
+    "clientData": {
+      "description": "Used for:\nPOST /admin/clients response (client_secret=plaintext, client_secret_hash=hash)\nPOST /admin/clients/rotate/{id} response (client_secret=new plaintext, client_secret_hash=new hash)\nPOST /sync/clients request array element (client_secret_hash=required hash, client_secret=ignored)",
+      "title": "ClientData represents an OAuth2 client with sidecar extensions.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/oAuth2Client"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "client_secret_hash": {
+              "description": "Pre-hashed client secret for storage and sync.\n\nIn responses (create/rotate):\nContains the hash of the plaintext secret - store this value.\n\nIn sync requests:\nRequired. Must contain the stored hash value.\nNote: client_secret is ignored in sync requests (use this field instead).",
+              "type": "string",
+              "x-go-name": "ClientSecretHash"
+            }
+          }
+        }
+      ],
+      "x-go-name": "ClientData",
+      "x-go-package": "github.com/example/hydra-sidecar"
+    },
+    "clientResult": {
+      "type": "object",
+      "title": "ClientResult is the result for a single client in sync.",
+      "properties": {
+        "client_id": {
+          "description": "Client ID",
+          "type": "string",
+          "x-go-name": "ClientID"
+        },
+        "error": {
+          "description": "Error message if status is \"failed\"",
+          "type": "string",
+          "x-go-name": "Error"
+        },
+        "status": {
+          "description": "Operation status: \"created\", \"updated\", \"deleted\", or \"failed\"",
+          "type": "string",
+          "x-go-name": "Status"
+        }
+      },
+      "x-go-name": "ClientResult",
+      "x-go-package": "github.com/example/hydra-sidecar"
+    },
+    "oAuth2Client": {
+      "description": "OAuth 2.0 Clients are used to perform OAuth 2.0 and OpenID Connect flows. Usually, OAuth 2.0 clients are\ngenerated for applications which want to consume your OAuth 2.0 or OpenID Connect capabilities.",
+      "type": "object",
+      "title": "OAuth 2.0 Client",
+      "properties": {
+        "access_token_strategy": {
+          "description": "OAuth 2.0 Access Token Strategy\n\nAccessTokenStrategy is the strategy used to generate access tokens.\nValid options are `jwt` and `opaque`. `jwt` is a bad idea, see https://www.ory.sh/docs/hydra/advanced#json-web-tokens\nSetting the stragegy here overrides the global setting in `strategies.access_token`.",
+          "type": "string",
+          "x-go-name": "AccessTokenStrategy"
+        },
+        "allowed_cors_origins": {
+          "$ref": "#/definitions/StringSliceJSONFormat"
+        },
+        "audience": {
+          "$ref": "#/definitions/StringSliceJSONFormat"
+        },
+        "authorization_code_grant_access_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "authorization_code_grant_id_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "authorization_code_grant_refresh_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "backchannel_logout_session_required": {
+          "description": "OpenID Connect Back-Channel Logout Session Required\n\nBoolean value specifying whether the RP requires that a sid (session ID) Claim be included in the Logout\nToken to identify the RP session with the OP when the backchannel_logout_uri is used.\nIf omitted, the default value is false.",
+          "type": "boolean",
+          "x-go-name": "BackChannelLogoutSessionRequired"
+        },
+        "backchannel_logout_uri": {
+          "description": "OpenID Connect Back-Channel Logout URI\n\nRP URL that will cause the RP to log itself out when sent a Logout Token by the OP.",
+          "type": "string",
+          "x-go-name": "BackChannelLogoutURI"
+        },
+        "client_credentials_grant_access_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "client_id": {
+          "description": "OAuth 2.0 Client ID\n\nThe ID is immutable. If no ID is provided, a UUID4 will be generated.",
+          "type": "string",
+          "x-go-name": "ID"
+        },
+        "client_name": {
+          "description": "OAuth 2.0 Client Name\n\nThe human-readable name of the client to be presented to the\nend-user during authorization.",
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "client_secret": {
+          "description": "OAuth 2.0 Client Secret\n\nThe secret will be included in the create request as cleartext, and then\nnever again. The secret is kept in hashed format and is not recoverable once lost.",
+          "type": "string",
+          "x-go-name": "Secret"
+        },
+        "client_secret_expires_at": {
+          "description": "OAuth 2.0 Client Secret Expires At\n\nThe field is currently not supported and its value is always 0.",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "SecretExpiresAt"
+        },
+        "client_uri": {
+          "description": "OAuth 2.0 Client URI\n\nClientURI is a URL string of a web page providing information about the client.\nIf present, the server SHOULD display this URL to the end-user in\na clickable fashion.",
+          "type": "string",
+          "x-go-name": "ClientURI"
+        },
+        "contacts": {
+          "$ref": "#/definitions/StringSliceJSONFormat"
+        },
+        "created_at": {
+          "description": "OAuth 2.0 Client Creation Date\n\nCreatedAt returns the timestamp of the client's creation.",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "CreatedAt"
+        },
+        "frontchannel_logout_session_required": {
+          "description": "OpenID Connect Front-Channel Logout Session Required\n\nBoolean value specifying whether the RP requires that iss (issuer) and sid (session ID) query parameters be\nincluded to identify the RP session with the OP when the frontchannel_logout_uri is used.\nIf omitted, the default value is false.",
+          "type": "boolean",
+          "x-go-name": "FrontChannelLogoutSessionRequired"
+        },
+        "frontchannel_logout_uri": {
+          "description": "OpenID Connect Front-Channel Logout URI\n\nRP URL that will cause the RP to log itself out when rendered in an iframe by the OP. An iss (issuer) query\nparameter and a sid (session ID) query parameter MAY be included by the OP to enable the RP to validate the\nrequest and to determine which of the potentially multiple sessions is to be logged out; if either is\nincluded, both MUST be.",
+          "type": "string",
+          "x-go-name": "FrontChannelLogoutURI"
+        },
+        "grant_types": {
+          "$ref": "#/definitions/StringSliceJSONFormat"
+        },
+        "implicit_grant_access_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "implicit_grant_id_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "jwks": {
+          "description": "OAuth 2.0 Client JSON Web Key Set\n\nClient's JSON Web Key Set [JWK] document, passed by value. The semantics of the jwks parameter are the same as\nthe jwks_uri parameter, other than that the JWK Set is passed by value, rather than by reference. This parameter\nis intended only to be used by Clients that, for some reason, are unable to use the jwks_uri parameter, for\ninstance, by native applications that might not have a location to host the contents of the JWK Set. If a Client\ncan use jwks_uri, it MUST NOT use jwks. One significant downside of jwks is that it does not enable key rotation\n(which jwks_uri does, as described in Section 10 of OpenID Connect Core 1.0 [OpenID.Core]). The jwks_uri and jwks\nparameters MUST NOT be used together.",
+          "x-go-name": "JSONWebKeys"
+        },
+        "jwks_uri": {
+          "description": "OAuth 2.0 Client JSON Web Key Set URL\n\nURL for the Client's JSON Web Key Set [JWK] document. If the Client signs requests to the Server, it contains\nthe signing key(s) the Server uses to validate signatures from the Client. The JWK Set MAY also contain the\nClient's encryption keys(s), which are used by the Server to encrypt responses to the Client. When both signing\nand encryption keys are made available, a use (Key Use) parameter value is REQUIRED for all keys in the referenced\nJWK Set to indicate each key's intended usage. Although some algorithms allow the same key to be used for both\nsignatures and encryption, doing so is NOT RECOMMENDED, as it is less secure. The JWK x5c parameter MAY be used\nto provide X.509 representations of keys provided. When used, the bare key values MUST still be present and MUST\nmatch those in the certificate.",
+          "type": "string",
+          "x-go-name": "JSONWebKeysURI"
+        },
+        "jwt_bearer_grant_access_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "logo_uri": {
+          "description": "OAuth 2.0 Client Logo URI\n\nA URL string referencing the client's logo.",
+          "type": "string",
+          "x-go-name": "LogoURI"
+        },
+        "metadata": {
+          "$ref": "#/definitions/JSONRawMessage"
+        },
+        "owner": {
+          "description": "OAuth 2.0 Client Owner\n\nOwner is a string identifying the owner of the OAuth 2.0 Client.",
+          "type": "string",
+          "x-go-name": "Owner"
+        },
+        "policy_uri": {
+          "description": "OAuth 2.0 Client Policy URI\n\nPolicyURI is a URL string that points to a human-readable privacy policy document\nthat describes how the deployment organization collects, uses,\nretains, and discloses personal data.",
+          "type": "string",
+          "x-go-name": "PolicyURI"
+        },
+        "post_logout_redirect_uris": {
+          "$ref": "#/definitions/StringSliceJSONFormat"
+        },
+        "redirect_uris": {
+          "$ref": "#/definitions/StringSliceJSONFormat"
+        },
+        "refresh_token_grant_access_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "refresh_token_grant_id_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "refresh_token_grant_refresh_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "registration_access_token": {
+          "description": "OpenID Connect Dynamic Client Registration Access Token\n\nRegistrationAccessToken can be used to update, get, or delete the OAuth2 Client. It is sent when creating a client\nusing Dynamic Client Registration.",
+          "type": "string",
+          "x-go-name": "RegistrationAccessToken"
+        },
+        "registration_client_uri": {
+          "description": "OpenID Connect Dynamic Client Registration URL\n\nRegistrationClientURI is the URL used to update, get, or delete the OAuth2 Client.",
+          "type": "string",
+          "x-go-name": "RegistrationClientURI"
+        },
+        "request_object_signing_alg": {
+          "description": "OpenID Connect Request Object Signing Algorithm\n\nJWS [JWS] alg algorithm [JWA] that MUST be used for signing Request Objects sent to the OP. All Request Objects\nfrom this Client MUST be rejected, if not signed with this algorithm.",
+          "type": "string",
+          "x-go-name": "RequestObjectSigningAlgorithm"
+        },
+        "request_uris": {
+          "$ref": "#/definitions/StringSliceJSONFormat"
+        },
+        "response_types": {
+          "$ref": "#/definitions/StringSliceJSONFormat"
+        },
+        "scope": {
+          "description": "OAuth 2.0 Client Scope\n\nScope is a string containing a space-separated list of scope values (as\ndescribed in Section 3.3 of OAuth 2.0 [RFC6749]) that the client\ncan use when requesting access tokens.",
+          "type": "string",
+          "x-go-name": "Scope",
+          "example": "scope1 scope-2 scope.3 scope:4"
+        },
+        "sector_identifier_uri": {
+          "description": "OpenID Connect Sector Identifier URI\n\nURL using the https scheme to be used in calculating Pseudonymous Identifiers by the OP. The URL references a\nfile with a single JSON array of redirect_uri values.",
+          "type": "string",
+          "x-go-name": "SectorIdentifierURI"
+        },
+        "skip_consent": {
+          "description": "SkipConsent skips the consent screen for this client. This field can only\nbe set from the admin API.",
+          "type": "boolean",
+          "x-go-name": "SkipConsent"
+        },
+        "skip_logout_consent": {
+          "description": "SkipLogoutConsent skips the logout consent screen for this client. This field can only\nbe set from the admin API.",
+          "type": "boolean",
+          "x-go-name": "SkipLogoutConsent"
+        },
+        "subject_type": {
+          "description": "OpenID Connect Subject Type\n\nThe `subject_types_supported` Discovery parameter contains a\nlist of the supported subject_type values for this server. Valid types include `pairwise` and `public`.",
+          "type": "string",
+          "x-go-name": "SubjectType"
+        },
+        "token_endpoint_auth_method": {
+          "description": "OAuth 2.0 Token Endpoint Authentication Method\n\nRequested Client Authentication method for the Token Endpoint. The options are:\n\n`client_secret_basic`: (default) Send `client_id` and `client_secret` as `application/x-www-form-urlencoded` encoded in the HTTP Authorization header.\n`client_secret_post`: Send `client_id` and `client_secret` as `application/x-www-form-urlencoded` in the HTTP body.\n`private_key_jwt`: Use JSON Web Tokens to authenticate the client.\n`none`: Used for public clients (native apps, mobile apps) which can not have secrets.",
+          "type": "string",
+          "default": "client_secret_basic",
+          "x-go-name": "TokenEndpointAuthMethod"
+        },
+        "token_endpoint_auth_signing_alg": {
+          "description": "OAuth 2.0 Token Endpoint Signing Algorithm\n\nRequested Client Authentication signing algorithm for the Token Endpoint.",
+          "type": "string",
+          "x-go-name": "TokenEndpointAuthSigningAlgorithm"
+        },
+        "tos_uri": {
+          "description": "OAuth 2.0 Client Terms of Service URI\n\nA URL string pointing to a human-readable terms of service\ndocument for the client that describes a contractual relationship\nbetween the end-user and the client that the end-user accepts when\nauthorizing the client.",
+          "type": "string",
+          "x-go-name": "TermsOfServiceURI"
+        },
+        "updated_at": {
+          "description": "OAuth 2.0 Client Last Update Date\n\nUpdatedAt returns the timestamp of the last update.",
+          "type": "string",
+          "format": "date-time",
+          "x-go-name": "UpdatedAt"
+        },
+        "userinfo_signed_response_alg": {
+          "description": "OpenID Connect Request Userinfo Signed Response Algorithm\n\nJWS alg algorithm [JWA] REQUIRED for signing UserInfo Responses. If this is specified, the response will be JWT\n[JWT] serialized, and signed using JWS. The default, if omitted, is for the UserInfo Response to return the Claims\nas a UTF-8 encoded JSON object using the application/json content-type.",
+          "type": "string",
+          "x-go-name": "UserinfoSignedResponseAlg"
+        }
+      },
+      "x-go-name": "Client",
+      "x-go-package": "github.com/ory/hydra/v2/client"
+    },
+    "oAuth2ClientTokenLifespans": {
+      "description": "Lifespans of different token types issued for this OAuth 2.0 Client.",
+      "type": "object",
+      "title": "OAuth 2.0 Client Token Lifespans",
+      "properties": {
+        "authorization_code_grant_access_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "authorization_code_grant_id_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "authorization_code_grant_refresh_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "client_credentials_grant_access_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "implicit_grant_access_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "implicit_grant_id_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "jwt_bearer_grant_access_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "refresh_token_grant_access_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "refresh_token_grant_id_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        },
+        "refresh_token_grant_refresh_token_lifespan": {
+          "$ref": "#/definitions/NullDuration"
+        }
+      },
+      "x-go-name": "Lifespans",
+      "x-go-package": "github.com/ory/hydra/v2/client"
+    },
+    "rotateClientRequest": {
+      "type": "object",
+      "title": "RotateClientRequest is the optional request body for secret rotation.",
+      "properties": {
+        "client_secret_expires_at": {
+          "description": "Unix timestamp when the new secret expires (0 = never)",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "ClientSecretExpiresAt"
+        }
+      },
+      "x-go-name": "RotateClientRequest",
+      "x-go-package": "github.com/example/hydra-sidecar"
+    },
+    "syncClientsRequest": {
+      "type": "object",
+      "title": "SyncClientsRequest is the request body for bulk client sync.",
+      "properties": {
+        "clients": {
+          "description": "Array of clients to sync.\nEach client must have client_secret_hash set to the stored hash value.\nThe client_secret field is ignored (use client_secret_hash instead).",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/clientData"
+          },
+          "x-go-name": "Clients"
+        }
+      },
+      "x-go-name": "SyncClientsRequest",
+      "x-go-package": "github.com/example/hydra-sidecar"
+    },
+    "syncResult": {
+      "type": "object",
+      "title": "SyncResult is the response from bulk client sync.",
+      "properties": {
+        "created_count": {
+          "description": "Number of clients created",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "CreatedCount"
+        },
+        "deleted_count": {
+          "description": "Number of clients deleted",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "DeletedCount"
+        },
+        "failed_count": {
+          "description": "Number of operations that failed",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "FailedCount"
+        },
+        "results": {
+          "description": "Per-client operation results",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/clientResult"
+          },
+          "x-go-name": "Results"
+        },
+        "updated_count": {
+          "description": "Number of clients updated",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "UpdatedCount"
+        }
+      },
+      "x-go-name": "SyncResult",
+      "x-go-package": "github.com/example/hydra-sidecar"
+    },
+    "tokenHookErrorResponse": {
+      "type": "object",
+      "title": "TokenHookErrorResponse represents an error response to Hydra token hook.",
+      "properties": {
+        "error": {
+          "description": "Error code (e.g., \"access_denied\")",
+          "type": "string",
+          "x-go-name": "Error"
+        },
+        "error_description": {
+          "description": "Human-readable error description",
+          "type": "string",
+          "x-go-name": "ErrorDescription"
+        }
+      },
+      "x-go-name": "TokenHookErrorResponse",
+      "x-go-package": "github.com/example/hydra-sidecar"
+    },
+    "tokenHookRequest": {
+      "type": "object",
+      "title": "TokenHookRequest represents the incoming request from Hydra token hook.",
+      "properties": {
+        "request": {
+          "type": "object",
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "x-go-name": "ClientID"
+            },
+            "granted_scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "x-go-name": "Scopes"
+            }
+          },
+          "x-go-name": "Request"
+        },
+        "session": {
+          "type": "object",
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "x-go-name": "ClientID"
+            }
+          },
+          "x-go-name": "Session"
+        }
+      },
+      "x-go-name": "TokenHookRequest",
+      "x-go-package": "github.com/example/hydra-sidecar"
+    },
+    "tokenHookResponse": {
+      "type": "object",
+      "title": "TokenHookResponse represents the response to Hydra token hook.",
+      "properties": {
+        "session": {
+          "type": "object",
+          "properties": {
+            "access_token": {
+              "type": "object",
+              "additionalProperties": {},
+              "x-go-name": "AccessToken"
+            }
+          },
+          "x-go-name": "Session"
+        }
+      },
+      "x-go-name": "TokenHookResponse",
+      "x-go-package": "github.com/example/hydra-sidecar"
+    }
+  },
+  "responses": {
+    "clientDataResponse": {
+      "description": "ClientDataResponse wraps ClientData for swagger response.",
+      "schema": {
+        "$ref": "#/definitions/clientData"
+      }
+    },
+    "errorResponse": {
+      "description": "ErrorResponse represents an error response.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "description": "Error message",
+            "type": "string",
+            "x-go-name": "Error"
+          }
+        }
+      }
+    },
+    "healthResponse": {
+      "description": "HealthResponse represents a health check response."
+    },
+    "noContent": {
+      "description": "NoContentResponse represents a 204 No Content response."
+    },
+    "syncResultResponse": {
+      "description": "SyncResultResponse wraps SyncResult for swagger response.",
+      "schema": {
+        "$ref": "#/definitions/syncResult"
+      }
+    },
+    "tokenHookErrorResponseWrapper": {
+      "description": "TokenHookErrorResponseWrapper wraps TokenHookErrorResponse for swagger.",
+      "schema": {
+        "$ref": "#/definitions/tokenHookErrorResponse"
+      }
+    },
+    "tokenHookResponseWrapper": {
+      "description": "TokenHookResponseWrapper wraps TokenHookResponse for swagger.",
+      "schema": {
+        "$ref": "#/definitions/tokenHookResponse"
+      }
+    }
+  }
 }

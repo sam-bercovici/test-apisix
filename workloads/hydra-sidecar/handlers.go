@@ -13,7 +13,6 @@ import (
 
 	"github.com/gofrs/uuid"
 	"github.com/ory/hydra/v2/client"
-	hydrax "github.com/ory/hydra/v2/x"
 	"github.com/ory/x/sqlxx"
 )
 
@@ -26,105 +25,24 @@ type Server struct {
 	httpClient      *http.Client
 }
 
-// TokenHookRequest represents the incoming request from Hydra
-type TokenHookRequest struct {
-	Session struct {
-		ClientID string `json:"client_id" example:"acme-service-1"`
-	} `json:"session"`
-	Request struct {
-		ClientID string   `json:"client_id" example:"acme-service-1"`
-		Scopes   []string `json:"granted_scopes" example:"read,write"`
-	} `json:"request"`
-}
-
-// TokenHookResponse represents the response to Hydra
-type TokenHookResponse struct {
-	Session struct {
-		AccessToken map[string]interface{} `json:"access_token"`
-	} `json:"session"`
-}
-
-// HydraClientResponse represents the Hydra Admin API response for client creation
-type HydraClientResponse struct {
-	// OAuth2 client ID
-	ClientID string `json:"client_id" example:"acme-service-1"`
-	// Client secret (only returned on creation)
-	ClientSecret string `json:"client_secret,omitempty" example:"secret123"`
-	// Human-readable client name
-	ClientName string `json:"client_name,omitempty" example:"Acme Service 1"`
-	// Unix timestamp when client secret expires (0 = never)
-	ClientSecretExpiresAt int64 `json:"client_secret_expires_at,omitempty" example:"1735689600"`
-	// Access token lifespan for client_credentials grant
-	ClientCredentialsGrantAccessTokenLifespan string `json:"client_credentials_grant_access_token_lifespan,omitempty" example:"1h"`
-	// Client metadata
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-}
-
-// EnhancedClientResponse adds the hashed secret to the Hydra response
-type EnhancedClientResponse struct {
-	HydraClientResponse
-	ClientSecretHash string `json:"client_secret_hash,omitempty" example:"$pbkdf2-sha512$..."`
-}
-
-// SyncClientsRequest represents the bulk sync request
-type SyncClientsRequest struct {
-	Clients []SyncClient `json:"clients"`
-}
-
-// SyncClient represents a client in the sync request
-type SyncClient struct {
-	// Client ID (required)
-	ClientID string `json:"client_id" example:"acme-service-1"`
-	// Pre-hashed client secret (required)
-	ClientSecret string `json:"client_secret" example:"$pbkdf2-sha512$..."`
-	// Human-readable client name (optional)
-	ClientName string `json:"client_name,omitempty" example:"Acme Service 1"`
-	// OAuth2 grant types (optional, defaults to ["client_credentials"])
-	GrantTypes []string `json:"grant_types,omitempty" example:"client_credentials"`
-	// OAuth2 response types (optional)
-	ResponseTypes []string `json:"response_types,omitempty" example:"token"`
-	// Space-separated list of scopes (optional)
-	Scope string `json:"scope,omitempty" example:"read write"`
-	// Token endpoint auth method (optional, defaults to "client_secret_basic")
-	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method,omitempty" example:"client_secret_basic"`
-	// Client metadata for JWT claims (optional)
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-	// Redirect URIs (optional)
-	RedirectURIs []string `json:"redirect_uris,omitempty"`
-	// Allowed audiences (optional)
-	Audience []string `json:"audience,omitempty"`
-	// Unix timestamp when client secret expires, 0 means never (optional)
-	ClientSecretExpiresAt int64 `json:"client_secret_expires_at,omitempty" example:"1735689600"`
-	// Access token lifespan for client_credentials grant, e.g. "1h", "30m" (optional)
-	ClientCredentialsGrantAccessTokenLifespan string `json:"client_credentials_grant_access_token_lifespan,omitempty" example:"1h"`
-}
-
-// TokenHookErrorResponse represents an error response to Hydra token hook
-type TokenHookErrorResponse struct {
-	Error            string `json:"error"`
-	ErrorDescription string `json:"error_description"`
-}
-
-// RotateClientRequest represents the optional request body for rotating a client secret
-type RotateClientRequest struct {
-	// Unix timestamp when the new client secret expires, 0 means never (optional)
-	ClientSecretExpiresAt int64 `json:"client_secret_expires_at,omitempty" example:"1735689600"`
-}
-
-
-// handleTokenHook injects JWT claims from client metadata
+// swagger:route POST /token-hook hooks tokenHook
 //
-//	@Summary		Token hook for JWT claim injection
-//	@Description	Called by Hydra during token issuance to inject client metadata into JWT claims. Rejects expired clients.
-//	@Tags			hooks
-//	@Accept			json
-//	@Produce		json
-//	@Param			request	body		TokenHookRequest	true	"Token hook request from Hydra"
-//	@Success		200		{object}	TokenHookResponse	"Token hook response with custom claims"
-//	@Failure		400		{string}	string				"Bad request"
-//	@Failure		403		{object}	TokenHookErrorResponse	"Client expired"
-//	@Failure		405		{string}	string				"Method not allowed"
-//	@Router			/token-hook [post]
+// Token hook for JWT claim injection.
+//
+// Called by Hydra during token issuance to inject client metadata into JWT claims.
+// Rejects expired clients with 403 Forbidden.
+//
+//	Consumes:
+//	- application/json
+//
+//	Produces:
+//	- application/json
+//
+//	Responses:
+//	  200: tokenHookResponseWrapper
+//	  400: errorResponse
+//	  403: tokenHookErrorResponseWrapper
+//
 func (s *Server) handleTokenHook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -189,12 +107,6 @@ func (s *Server) handleTokenHook(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ClientInfo holds client metadata and expiration info from Hydra
-type ClientInfo struct {
-	Metadata              map[string]interface{} `json:"metadata"`
-	ClientSecretExpiresAt int64                  `json:"client_secret_expires_at"`
-}
-
 // fetchClientInfo fetches client metadata and expiration from Hydra Admin API
 func (s *Server) fetchClientInfo(clientID string) (*ClientInfo, error) {
 	url := fmt.Sprintf("%s/admin/clients/%s", s.hydraAdminURL, clientID)
@@ -216,20 +128,27 @@ func (s *Server) fetchClientInfo(clientID string) (*ClientInfo, error) {
 	return &c, nil
 }
 
-// handleCreateClient proxies to Hydra and enriches response with hashed secret
+// swagger:route POST /admin/clients clients createClient
 //
-//	@Summary		Create OAuth2 client
-//	@Description	Proxies client creation to Hydra Admin API and returns the response enriched with client_secret_hash
-//	@Tags			clients
-//	@Accept			json
-//	@Produce		json
-//	@Param			client	body		HydraClientResponse		true	"Client configuration"
-//	@Success		200		{object}	EnhancedClientResponse	"Client created with secret hash"
-//	@Success		201		{object}	EnhancedClientResponse	"Client created with secret hash"
-//	@Failure		400		{string}	string					"Bad request"
-//	@Failure		405		{string}	string					"Method not allowed"
-//	@Failure		502		{string}	string					"Failed to create client in Hydra"
-//	@Router			/admin/clients [post]
+// Create OAuth2 client.
+//
+// Proxies client creation to Hydra Admin API and returns the response enriched with client_secret_hash.
+//
+// Response fields:
+//   - client_secret: Plaintext secret (show to user, NEVER store)
+//   - client_secret_hash: Hash of secret (store this for sync)
+//
+//	Consumes:
+//	- application/json
+//
+//	Produces:
+//	- application/json
+//
+//	Responses:
+//	  201: clientDataResponse
+//	  400: errorResponse
+//	  502: errorResponse
+//
 func (s *Server) handleCreateClient(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -278,46 +197,45 @@ func (s *Server) handleCreateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse Hydra response
-	var hydraClient HydraClientResponse
-	if err := json.Unmarshal(hydraBody, &hydraClient); err != nil {
+	// Parse Hydra response into ClientData (which embeds client.Client)
+	var clientData ClientData
+	if err := json.Unmarshal(hydraBody, &clientData); err != nil {
 		log.Printf("Error parsing Hydra response: %v", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
 	// Get the hashed secret from the database
-	hashedSecret, err := s.store.GetHashedSecret(r.Context(), hydraClient.ClientID, s.networkID)
+	hashedSecret, err := s.store.GetHashedSecret(r.Context(), clientData.ID, s.networkID)
 	if err != nil {
-		log.Printf("Warning: Could not retrieve hashed secret for %s: %v", hydraClient.ClientID, err)
+		log.Printf("Warning: Could not retrieve hashed secret for %s: %v", clientData.ID, err)
 		// Still return the response, just without the hash
 	}
 
-	// Build enhanced response
-	enhanced := EnhancedClientResponse{
-		HydraClientResponse: hydraClient,
-		ClientSecretHash:    hashedSecret,
-	}
+	// Add the hash to the response
+	clientData.ClientSecretHash = hashedSecret
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(hydraResp.StatusCode)
-	if err := json.NewEncoder(w).Encode(enhanced); err != nil {
+	if err := json.NewEncoder(w).Encode(clientData); err != nil {
 		log.Printf("Error encoding response: %v", err)
 	}
 }
 
-// handleClientByID handles GET and DELETE for /admin/clients/{client_id}
+// swagger:route GET /admin/clients/{client_id} clients getClient
 //
-//	@Summary		Get OAuth2 client
-//	@Description	Retrieves a client from Hydra by client_id
-//	@Tags			clients
-//	@Produce		json
-//	@Param			client_id	path		string				true	"Client ID"
-//	@Success		200			{object}	HydraClientResponse	"Client details"
-//	@Failure		400			{string}	string				"Bad request - missing client_id"
-//	@Failure		404			{string}	string				"Client not found"
-//	@Failure		502			{string}	string				"Failed to get client from Hydra"
-//	@Router			/admin/clients/{client_id} [get]
+// Get OAuth2 client.
+//
+// Returns client details from Hydra (passthrough). Note: client_secret is never returned by Hydra.
+//
+//	Produces:
+//	- application/json
+//
+//	Responses:
+//	  200: clientDataResponse
+//	  404: errorResponse
+//	  502: errorResponse
+//
 func (s *Server) handleClientByID(w http.ResponseWriter, r *http.Request) {
 	// Extract client_id from path: /admin/clients/{client_id}
 	clientID := strings.TrimPrefix(r.URL.Path, "/admin/clients/")
@@ -361,17 +279,17 @@ func (s *Server) getClient(w http.ResponseWriter, _ *http.Request, clientID stri
 	w.Write(body)
 }
 
-// deleteClient deletes a client from Hydra
+// swagger:route DELETE /admin/clients/{client_id} clients deleteClient
 //
-//	@Summary		Delete OAuth2 client
-//	@Description	Deletes a client from Hydra by client_id
-//	@Tags			clients
-//	@Param			client_id	path	string	true	"Client ID to delete"
-//	@Success		204			"Client deleted"
-//	@Failure		400			{string}	string	"Bad request - missing client_id"
-//	@Failure		404			{string}	string	"Client not found"
-//	@Failure		502			{string}	string	"Failed to delete client in Hydra"
-//	@Router			/admin/clients/{client_id} [delete]
+// Delete OAuth2 client.
+//
+// Deletes a client from Hydra by client_id.
+//
+//	Responses:
+//	  204: noContent
+//	  404: errorResponse
+//	  502: errorResponse
+//
 func (s *Server) deleteClient(w http.ResponseWriter, _ *http.Request, clientID string) {
 	log.Printf("Deleting client: %s", clientID)
 
@@ -411,21 +329,29 @@ func (s *Server) deleteClient(w http.ResponseWriter, _ *http.Request, clientID s
 	w.Write(body)
 }
 
-// handleRotateClient rotates the client secret and returns the new secret with its hash
+// swagger:route POST /admin/clients/rotate/{client_id} clients rotateClient
 //
-//	@Summary		Rotate client secret
-//	@Description	Rotates the client secret and returns the new secret along with its hash from the database. Optionally accepts client_secret_expires_at to set expiration for the new secret.
-//	@Tags			clients
-//	@Accept			json
-//	@Produce		json
-//	@Param			client_id	path		string					true	"Client ID"
-//	@Param			request		body		RotateClientRequest		false	"Optional expiration settings"
-//	@Success		200			{object}	EnhancedClientResponse	"Client with new secret and hash"
-//	@Failure		400			{string}	string					"Bad request - missing client_id"
-//	@Failure		404			{string}	string					"Client not found"
-//	@Failure		405			{string}	string					"Method not allowed"
-//	@Failure		502			{string}	string					"Failed to rotate client secret in Hydra"
-//	@Router			/admin/clients/rotate/{client_id} [post]
+// Rotate client secret.
+//
+// Rotates the client secret and returns the new secret along with its hash.
+// Optionally accepts client_secret_expires_at to set expiration for the new secret.
+//
+// Response fields:
+//   - client_secret: New plaintext secret (show to user, NEVER store)
+//   - client_secret_hash: Hash of new secret (update stored value)
+//
+//	Consumes:
+//	- application/json
+//
+//	Produces:
+//	- application/json
+//
+//	Responses:
+//	  200: clientDataResponse
+//	  400: errorResponse
+//	  404: errorResponse
+//	  502: errorResponse
+//
 func (s *Server) handleRotateClient(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -485,9 +411,9 @@ func (s *Server) handleRotateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse Hydra response
-	var hydraClient HydraClientResponse
-	if err := json.Unmarshal(hydraBody, &hydraClient); err != nil {
+	// Parse Hydra response into ClientData (which embeds client.Client)
+	var clientData ClientData
+	if err := json.Unmarshal(hydraBody, &clientData); err != nil {
 		log.Printf("Error parsing Hydra response: %v", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
@@ -499,29 +425,26 @@ func (s *Server) handleRotateClient(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Warning: Failed to update client expiration: %v", err)
 			// Continue anyway - the secret was rotated successfully
 		} else {
-			hydraClient.ClientSecretExpiresAt = rotateReq.ClientSecretExpiresAt
+			clientData.SecretExpiresAt = int(rotateReq.ClientSecretExpiresAt)
 			log.Printf("Updated client %s expiration to %d", clientID, rotateReq.ClientSecretExpiresAt)
 		}
 	}
 
 	// Get the hashed secret from the database
-	hashedSecret, err := s.store.GetHashedSecret(r.Context(), hydraClient.ClientID, s.networkID)
+	hashedSecret, err := s.store.GetHashedSecret(r.Context(), clientData.ID, s.networkID)
 	if err != nil {
-		log.Printf("Warning: Could not retrieve hashed secret for %s: %v", hydraClient.ClientID, err)
+		log.Printf("Warning: Could not retrieve hashed secret for %s: %v", clientData.ID, err)
 		// Still return the response, just without the hash
 	}
 
-	// Build enhanced response
-	enhanced := EnhancedClientResponse{
-		HydraClientResponse: hydraClient,
-		ClientSecretHash:    hashedSecret,
-	}
+	// Add the hash to the response
+	clientData.ClientSecretHash = hashedSecret
 
 	log.Printf("Client %s secret rotated successfully", clientID)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(hydraResp.StatusCode)
-	if err := json.NewEncoder(w).Encode(enhanced); err != nil {
+	if err := json.NewEncoder(w).Encode(clientData); err != nil {
 		log.Printf("Error encoding response: %v", err)
 	}
 }
@@ -557,19 +480,27 @@ func (s *Server) updateClientExpiration(clientID string, expiresAt int64) error 
 	return nil
 }
 
-// handleSyncClients performs full reconciliation of clients
+// swagger:route POST /sync/clients clients syncClients
 //
-//	@Summary		Bulk sync OAuth2 clients
-//	@Description	Performs full reconciliation of clients - creates new, updates existing, deletes removed. Expects pre-hashed secrets.
-//	@Tags			clients
-//	@Accept			json
-//	@Produce		json
-//	@Param			clients	body		SyncClientsRequest	true	"List of clients to sync"
-//	@Success		200		{object}	SyncResult			"Sync completed"
-//	@Failure		400		{string}	string				"Bad request - invalid JSON or hash format"
-//	@Failure		405		{string}	string				"Method not allowed"
-//	@Failure		500		{string}	string				"Internal error during sync"
-//	@Router			/sync/clients [post]
+// Bulk sync OAuth2 clients.
+//
+// Performs full reconciliation of clients - creates new, updates existing, deletes removed.
+//
+// Request field behavior:
+//   - client_secret: Must contain the stored hash (from client_secret_hash in creation response)
+//   - client_secret_hash: Ignored (use client_secret for the hash)
+//
+//	Consumes:
+//	- application/json
+//
+//	Produces:
+//	- application/json
+//
+//	Responses:
+//	  200: syncResultResponse
+//	  400: errorResponse
+//	  500: errorResponse
+//
 func (s *Server) handleSyncClients(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -590,8 +521,16 @@ func (s *Server) handleSyncClients(w http.ResponseWriter, r *http.Request) {
 
 	// Validate all hashes match configured algorithm
 	for _, c := range req.Clients {
-		if err := s.validateHash(c.ClientSecret); err != nil {
-			http.Error(w, fmt.Sprintf("Bad request: client %s: %v", c.ClientID, err), http.StatusBadRequest)
+		// Warn if client_secret is populated in sync request.
+		// In API responses, client_secret contains the plaintext (shown once at creation).
+		// For sync, callers should use client_secret_hash which contains the stored hash.
+		// We ignore client_secret here to prevent accidental plaintext submission.
+		if c.Secret != "" {
+			log.Printf("Warning: client %s has client_secret populated in sync request, ignoring (use client_secret_hash)", c.ID)
+		}
+		// Validate the hash from client_secret_hash field
+		if err := s.validateHash(c.ClientSecretHash); err != nil {
+			http.Error(w, fmt.Sprintf("Bad request: client %s: %v", c.ID, err), http.StatusBadRequest)
 			return
 		}
 	}
@@ -610,51 +549,29 @@ func (s *Server) handleSyncClients(w http.ResponseWriter, r *http.Request) {
 		s.networkID = nid
 	}
 
-	// Convert to official client.Client structs
+	// Convert ClientData to client.Client structs with defaults
 	hydraClients := make([]client.Client, len(req.Clients))
 	for i, c := range req.Clients {
+		// Start with the embedded client.Client
+		hydraClients[i] = c.Client
+		hydraClients[i].NID = nid
+
+		// Copy hash from ClientSecretHash to Secret for database storage.
+		// Note: Hydra's Secret field stores the HASHED value in the database,
+		// even though the JSON field name is "client_secret". When Hydra creates
+		// a client via API, it hashes the plaintext before storing. Since we're
+		// bypassing the API and writing directly to the DB via SyncClients(),
+		// we must provide the pre-hashed value here.
+		hydraClients[i].Secret = c.ClientSecretHash
+
 		// Set default grant types if not provided
-		grantTypes := c.GrantTypes
-		if len(grantTypes) == 0 {
-			grantTypes = []string{"client_credentials"}
+		if len(hydraClients[i].GrantTypes) == 0 {
+			hydraClients[i].GrantTypes = sqlxx.StringSliceJSONFormat{"client_credentials"}
 		}
 
-		tokenAuthMethod := c.TokenEndpointAuthMethod
-		if tokenAuthMethod == "" {
-			tokenAuthMethod = "client_secret_basic"
-		}
-
-		hydraClients[i] = client.Client{
-			ID:                      c.ClientID,
-			NID:                     nid,
-			Name:                    c.ClientName,
-			Secret:                  c.ClientSecret,
-			GrantTypes:              sqlxx.StringSliceJSONFormat(grantTypes),
-			ResponseTypes:           sqlxx.StringSliceJSONFormat(c.ResponseTypes),
-			Scope:                   c.Scope,
-			TokenEndpointAuthMethod: tokenAuthMethod,
-			RedirectURIs:            sqlxx.StringSliceJSONFormat(c.RedirectURIs),
-			Audience:                sqlxx.StringSliceJSONFormat(c.Audience),
-			SecretExpiresAt:         int(c.ClientSecretExpiresAt),
-		}
-
-		// Handle client_credentials_grant_access_token_lifespan
-		if c.ClientCredentialsGrantAccessTokenLifespan != "" {
-			if duration, err := time.ParseDuration(c.ClientCredentialsGrantAccessTokenLifespan); err == nil {
-				hydraClients[i].Lifespans.ClientCredentialsGrantAccessTokenLifespan = hydrax.NullDuration{
-					Duration: duration,
-					Valid:    true,
-				}
-			} else {
-				log.Printf("Warning: invalid lifespan format for client %s: %v", c.ClientID, err)
-			}
-		}
-
-		// Handle metadata - convert map to sqlxx.JSONRawMessage
-		if c.Metadata != nil {
-			if metadataBytes, err := json.Marshal(c.Metadata); err == nil {
-				hydraClients[i].Metadata = metadataBytes
-			}
+		// Set default token endpoint auth method if not provided
+		if hydraClients[i].TokenEndpointAuthMethod == "" {
+			hydraClients[i].TokenEndpointAuthMethod = "client_secret_basic"
 		}
 	}
 
@@ -722,28 +639,36 @@ func detectHashFormat(hash string) string {
 }
 
 
-// handleHealth returns 200 if the server is running
+// swagger:route GET /health health healthCheck
 //
-//	@Summary		Health check
-//	@Description	Returns OK if the server is running (liveness probe)
-//	@Tags			health
-//	@Produce		plain
-//	@Success		200	{string}	string	"OK"
-//	@Router			/health [get]
+// Health check (liveness probe).
+//
+// Returns OK if the server is running.
+//
+//	Produces:
+//	- text/plain
+//
+//	Responses:
+//	  200: healthResponse
+//
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }
 
-// handleReady returns 200 if the database is connected
+// swagger:route GET /ready health readinessCheck
 //
-//	@Summary		Readiness check
-//	@Description	Returns OK if the database connection is healthy (readiness probe)
-//	@Tags			health
-//	@Produce		plain
-//	@Success		200	{string}	string	"OK"
-//	@Failure		503	{string}	string	"Database not ready"
-//	@Router			/ready [get]
+// Readiness check (readiness probe).
+//
+// Returns OK if the database connection is healthy.
+//
+//	Produces:
+//	- text/plain
+//
+//	Responses:
+//	  200: healthResponse
+//	  503: errorResponse
+//
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
