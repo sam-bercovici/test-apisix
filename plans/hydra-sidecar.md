@@ -112,7 +112,7 @@ Uses **go-swagger** (same tool as Hydra) with `swagger:allOf` composition.
 | `/admin/clients` | POST response | **Plaintext** (show to user, never store) | **Hash** (store this) |
 | `/admin/clients/{id}` | GET response | Empty (Hydra never returns it) | - |
 | `/admin/clients/rotate/{id}` | POST response | **Plaintext** (new secret, show to user) | **Hash** (new hash, store this) |
-| `/sync/clients` | POST request | **Hash** (the stored `client_secret_hash`) | Ignored |
+| `/sync/clients` | POST request | Ignored (warning logged if populated) | **Hash** (required) |
 | `/sync/clients` | POST response | - | - (returns `syncResult`) |
 
 ---
@@ -174,13 +174,13 @@ Full reconciliation - Hydra's client table will exactly match the request.
 2. Upsert all clients from the request
 3. **Delete** any clients in Hydra NOT present in the request
 
-**Request**: `syncClientsRequest` - Array of `clientData` with `client_secret` containing the **hash**
+**Request**: `syncClientsRequest` - Array of `clientData` with `client_secret_hash` containing the stored hash
 ```json
 {
   "clients": [
     {
       "client_id": "acme-service-1",
-      "client_secret": "$pbkdf2-sha256$i=25000,l=32$salt$hash",
+      "client_secret_hash": "$pbkdf2-sha256$i=25000,l=32$salt$hash",
       "client_name": "Acme Service 1",
       "grant_types": ["client_credentials"],
       "token_endpoint_auth_method": "client_secret_post",
@@ -191,7 +191,7 @@ Full reconciliation - Hydra's client table will exactly match the request.
 }
 ```
 
-**Note**: In sync requests, `client_secret` contains the hash (from `client_secret_hash` in creation response). The `client_secret_hash` field is ignored.
+**Note**: In sync requests, use `client_secret_hash` to pass the stored hash. The `client_secret` field is ignored (a warning is logged if populated).
 
 **Response**: `syncResult`
 ```json
