@@ -57,12 +57,12 @@ tidy: ## Tidy go modules (runs in container, no local Go required)
 
 ##@ Security
 
-vuln: ## Run Go vulnerability check (https://go.dev/doc/security/vuln/)
+vuln: ## Run Go vulnerability check - fails on ANY vulnerability (https://go.dev/doc/security/vuln/)
 	docker run --rm \
 		-v "$$(pwd):/app" \
 		-w /app \
 		$(GO_IMAGE) \
-		sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./..."
+		sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck -scan module"
 
 ##@ Documentation
 

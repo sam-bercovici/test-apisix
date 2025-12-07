@@ -48,10 +48,12 @@ This repository packages Envoy Gateway manifests for routing demo services with 
 
 ### Hydra Sidecar Build Commands
 
-Go module operations must be run via the Makefile using the build container (no local Go installation required):
+Go module operations must be run via the Makefile using the build container (no local Go installation required).
+
+**Go Version:** This project uses Go 1.25 (latest). The Makefile runs all Go commands in a `golang:1.25-alpine` container.
 
 ```bash
-# Tidy go modules (runs in golang:1.21-alpine container)
+# Tidy go modules (runs in golang:1.25-alpine container)
 make -C workloads/hydra-sidecar tidy
 
 # Build image for local Kind cluster
@@ -77,7 +79,7 @@ helm upgrade --install eg oci://docker.io/envoyproxy/gateway-helm \
 
 # Install Ory Hydra
 helm upgrade --install hydra ory/hydra \
-  --version 0.52.0 -n hydra \
+  --version 0.60.0 -n hydra \
   -f hydra/helm-values.yaml
 
 # Apply gateway resources
