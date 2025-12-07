@@ -6,7 +6,7 @@ set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-envoy-gateway-system}"
 GATEWAY_NAME="${GATEWAY_NAME:-eg-gateway}"
-LOCAL_PORT="${LOCAL_PORT:-8080}"
+LOCAL_PORT="${LOCAL_PORT:-8888}"
 
 # Find the Envoy service for the gateway
 SVC_NAME="$(kubectl get svc -n "${NAMESPACE}" \

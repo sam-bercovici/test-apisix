@@ -8,7 +8,7 @@ set -euo pipefail
 # Configuration
 # ---------------------------------------------------------------------------
 GATEWAY_HOST="${GATEWAY_HOST:-localhost}"
-GATEWAY_PORT="${GATEWAY_PORT:-8080}"
+GATEWAY_PORT="${GATEWAY_PORT:-8888}"
 HYDRA_TOKEN_PATH="${HYDRA_TOKEN_PATH:-/auth/oauth2/token}"
 CLIENT_ID="${CLIENT_ID:-go-rest}"
 # Try to get client secret from K8s secret if not provided
