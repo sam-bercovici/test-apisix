@@ -2,7 +2,10 @@
 # Build and version management for the sidecar
 
 # Image settings
+REPO_NAME ?= 
+IMAGE_PROJECT_NAME ?= 
 IMAGE_NAME ?= hydra-sidecar
+FULL_IMAGE_NAME ?= $(REPO_NAME)$(IMAGE_PROJECT_NAME)$(IMAGE_NAME)
 IMAGE_TAG ?= latest
 PLATFORMS ?= linux/amd64,linux/arm64
 DISTROLESS_VARIANT ?= debug-nonroot
@@ -26,25 +29,25 @@ build: validate-versions ## Multi-arch build and push to registry
 		--platform $(PLATFORMS) \
 		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg DISTROLESS_VARIANT=$(DISTROLESS_VARIANT) \
-		-t $(IMAGE_NAME):$(IMAGE_TAG) \
+		-t $(FULL_IMAGE_NAME):$(IMAGE_TAG) \
 		--push .
 
 build-local: validate-versions tidy vuln ## Local build for current arch (for kind)
 	docker build \
 		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg DISTROLESS_VARIANT=$(DISTROLESS_VARIANT) \
-		-t $(IMAGE_NAME):$(IMAGE_TAG) .
+		-t $(FULL_IMAGE_NAME):$(IMAGE_TAG) .
 
 build-hardened: validate-versions tidy vuln ## Production build without shell
 	docker buildx build \
 		--platform $(PLATFORMS) \
 		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg DISTROLESS_VARIANT=nonroot \
-		-t $(IMAGE_NAME):$(IMAGE_TAG) \
+		-t $(FULL_IMAGE_NAME):$(IMAGE_TAG) \
 		--push .
 
 clean: ## Remove built images
-	docker rmi $(IMAGE_NAME):$(IMAGE_TAG) || true
+	docker rmi $(FULL_IMAGE_NAME):$(IMAGE_TAG) || true
 
 ##@ Go Module Management
 

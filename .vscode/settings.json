@@ -3,15 +3,20 @@
         "APISIX",
         "apitest",
         "backendtrafficpolicy",
+        "buildx",
         "cloudnative",
         "cnpg",
         "curlimages",
+        "DISTROLESS",
         "envoypatchpolicy",
         "envoyproxy",
         "gofrs",
+        "govulncheck",
         "httproute",
         "Jetstack",
+        "nonroot",
         "securitypolicy",
-        "sqlxx"
+        "sqlxx",
+        "swaggo"
     ]
 }
